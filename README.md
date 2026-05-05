@@ -41,6 +41,12 @@ python scripts/simulation/teleop_dual_ur5e_mujoco.py
 ```
 This script initializes the [`MujocoTeleopController`](xrobotoolkit_teleop/simulation/mujoco_teleop_controller.py) with the UR5e model and starts the teleoperation loop.
 
+To run the teleoperation demo with dual Agilex Piper robotic arms in MuJoCo simulation:
+
+```bash
+python scripts/simulation/teleop_dual_piper_mujoco.py
+```
+
 ### Running the Placo Visualization Demo
 
 To run the teleoperation demo with a UR5e robot in Placo visualization:
@@ -103,6 +109,37 @@ python scripts/hardware/teleop_r1lite_hardware.py
 ```
 
 This script initializes the [`GalaxeaR1LiteTeleopController`](xrobotoolkit_teleop/hardware/galaxea_r1_lite_teleop_controller.py) for mobile manipulator control, the controller communicates with the robot hardware via ROS.
+
+### Running Agilex Piper Hardware Demo
+
+Find CAN modules (follows [piper_sdk](https://github.com/agilexrobotics/piper_sdk)):
+
+```bash
+bash find_all_can_port.sh
+```
+
+If there are multiple modules, the output will look like this:
+
+```
+Both ethtool and can-utils are installed.
+Interface can1 is connected to USB port 1-4.4.3:1.0
+Interface can0 is connected to USB port 1-4.4.2:1.0
+```
+
+Activate the CAN devices:
+
+```bash
+bash can_activate.sh can1 1000000 "1-4.4.3:1.0"
+bash can_activate.sh can0 1000000 "1-4.4.2:1.0"
+```
+
+To run the teleoperation demo with dual Agilex Piper robotic arms:
+
+```bash
+python scripts/hardware/teleop_dual_piper_hardware.py
+```
+
+This script initializes the [`PiperTeleopController`](xrobotoolkit_teleop/hardware/piper_teleop_controller.py) for dual arm control with built-in grippers.
 
 ## Data Collection
 

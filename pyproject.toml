@@ -25,6 +25,8 @@ dependencies = [
     "pyrealsense2",
     "opencv-python",
     "tyro",
+    "python-can",
+    "piper_sdk",
 ]
 
 [project.optional-dependencies]
