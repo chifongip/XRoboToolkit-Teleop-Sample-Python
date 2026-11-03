@@ -254,10 +254,12 @@ class PiperInterface:
 
         try:
             msg = self._piper.GetMotorStates()
-            if msg is not None and hasattr(msg, 'motor_state'):
-                ms = msg.motor_state
+            if msg is not None:
                 # Motor speed is in 0.001 rad/s
-                return np.array([float(ms.motor_speed) / 1000.0] * 6)
+                return np.array([
+                    float(getattr(msg, f"motor_{i}").motor_speed) / 1000.0
+                    for i in range(1, 7)
+                ])
         except Exception:
             pass
 

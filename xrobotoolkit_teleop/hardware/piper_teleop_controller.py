@@ -229,6 +229,10 @@ class PiperTeleopController(HardwareTeleopController):
 
     def _shutdown_robot(self):
         """Gracefully shut down both arms (home position then disconnect)."""
-        for _, controller in self.arm_controllers.items():
-            controller.go_home()
-        time.sleep(1)
+        try:
+            for controller in self.arm_controllers.values():
+                controller.go_home()
+            time.sleep(1)
+        finally:
+            for controller in self.arm_controllers.values():
+                controller.disconnect()
