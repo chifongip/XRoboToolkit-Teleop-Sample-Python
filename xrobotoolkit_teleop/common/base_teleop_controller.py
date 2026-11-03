@@ -8,6 +8,7 @@ import numpy as np
 import placo
 from placo_utils.visualization import (
     frame_viz,
+    get_viewer,
     robot_frame_viz,
     robot_viz,
 )
@@ -274,7 +275,16 @@ class BaseTeleopController(abc.ABC):
 
     def _init_placo_viz(self):
         self.placo_vis = robot_viz(self.placo_robot)
-        webbrowser.open(self.placo_vis.viewer.url())
+        viewer = getattr(self.placo_vis, "viewer", None)
+        if viewer is not None:
+            url = viewer.url()
+        else:
+            viewer = get_viewer()
+            host = viewer.get_host()
+            if host in ("0.0.0.0", "::"):
+                host = "localhost"
+            url = f"http://{host}:{viewer.get_port()}"
+        webbrowser.open(url)
         self.placo_vis.display(self.placo_robot.state.q)
         for name, config in self.manipulator_config.items():
             robot_frame_viz(self.placo_robot, config["link_name"])

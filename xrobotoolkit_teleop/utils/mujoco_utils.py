@@ -1,7 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import mujoco
 import numpy as np
-import pinocchio as pin
 import placo
+
+if TYPE_CHECKING:
+    import pinocchio as pin
 
 
 def calc_mujoco_qpos_from_placo_q(
@@ -21,7 +27,14 @@ def calc_mujoco_qpos_from_placo_q(
     Returns:
         np.ndarray: The corresponding MuJoCo qpos.
     """
-    mujoco_qpos = calc_mujoco_qpos_from_pin_q(mujoco_model, placo_robot.model, placo_q, floating_base)
+    mujoco_qpos = np.zeros(mujoco_model.nq)
+    if floating_base:
+        mujoco_qpos[:3] = placo_q[:3]
+        mujoco_qpos[3:7] = mujoco_quat_from_pin_quat(placo_q[3:7])
+    for joint_name in placo_robot.joint_names():
+        offset = placo_robot.get_joint_offset(joint_name)
+        if not set_mujoco_joint_pos_by_name(mujoco_model, mujoco_qpos, joint_name, placo_q[offset]):
+            raise ValueError(f"Joint '{joint_name}' not found in MuJoCo model.")
 
     return mujoco_qpos
 
@@ -91,12 +104,15 @@ def calc_placo_q_from_mujoco_qpos(
     Returns:
         np.ndarray: The corresponding Placo joint configuration.
     """
-    placo_q = calc_pin_q_from_mujoco_qpos(
-        mujoco_model,
-        placo_robot.model,
-        mujoco_qpos,
-        floating_base=floating_base,
-    )
+    placo_q = placo_robot.state.q.copy()
+    placo_q[:7] = [0, 0, 0, 0, 0, 0, 1]
+    if floating_base:
+        placo_q[:3] = mujoco_qpos[:3]
+        placo_q[3:7] = pin_quat_from_mujoco_quat(mujoco_qpos[3:7])
+    for joint_name in placo_robot.joint_names():
+        joint_id = mujoco.mj_name2id(mujoco_model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id != -1:
+            placo_q[placo_robot.get_joint_offset(joint_name)] = mujoco_qpos[mujoco_model.jnt_qposadr[joint_id]]
 
     return placo_q
 
