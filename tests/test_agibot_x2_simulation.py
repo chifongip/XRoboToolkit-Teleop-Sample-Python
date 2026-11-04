@@ -77,13 +77,51 @@ class X2SimulationTests(unittest.TestCase):
             robot.state.q = calc_placo_q_from_mujoco_qpos(m, robot, q)
             robot.update_kinematics()
             for side in ("left", "right"):
-                name = f"{side}_wrist_roll_link"
+                name = f"{side}_hand_center"
                 target = robot.get_T_world_frame(name)
                 body = m.body(name).id
                 self.assertLess(np.linalg.norm(target[:3, 3] - data.xpos[body]), 1e-4)
                 delta = target[:3, :3].T @ data.xmat[body].reshape(3, 3)
                 angle = np.arccos(np.clip((np.trace(delta) - 1) / 2, -1, 1))
                 self.assertLess(angle, 1e-3)
+
+    def test_rigid_hand_centers_and_markers(self):
+        c = self.make_controller()
+        for side, expected in (
+            ("left", [0.00658717, -0.00936239, -0.0826008]),
+            ("right", [0.00671652, 0.00921908, -0.08261105]),
+        ):
+            name = f"{side}_hand_center"
+            frame = c.mj_model.body(name)
+            wrist = c.mj_model.body(f"{side}_wrist_roll_link")
+            self.assertEqual(frame.parentid[0], wrist.id)
+            np.testing.assert_allclose(frame.pos, expected, atol=1e-8)
+            np.testing.assert_allclose(c.mj_data.xmat[frame.id], c.mj_data.xmat[wrist.id], atol=1e-12)
+            self.assertEqual(c.manipulator_config[f"{side}_arm"]["link_name"], name)
+            marker = c.target_mocap_idx[f"{side}_arm"]
+            np.testing.assert_allclose(c.mj_data.mocap_pos[marker], c.mj_data.xpos[frame.id], atol=1e-4)
+
+    def test_native_vr_axes_and_xyzw_quaternions_map_to_robot_world(self):
+        c = self.make_controller()
+        c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
+        c.step_control()
+        targets = {side: c.effector_task[f"{side}_arm"].T_world_frame.copy() for side in ("left", "right")}
+        # Independent physical axis expectations, rather than deriving expected
+        # results from the very conversion matrix being tested.
+        expected_axes = ([0, -1, 0], [0, 0, 1], [-1, 0, 0])
+        angle = np.pi / 6
+        for side, initial in targets.items():
+            for raw_axis, robot_axis in zip(np.eye(3), expected_axes):
+                with self.subTest(side=side, raw_axis=raw_axis):
+                    pose = c.xr_client.poses[f"{side}_controller"]
+                    pose[:3] = 0.01 * raw_axis
+                    # SDK uses xyzw; meshcat and MuJoCo use wxyz.
+                    pose[3:] = np.roll(tf.quaternion_about_axis(angle, raw_axis), -1)
+                    c.step_control()
+                    target = c.effector_task[f"{side}_arm"].T_world_frame
+                    np.testing.assert_allclose(target[:3, 3], initial[:3, 3] + 0.01 * np.array(robot_axis), atol=1e-12)
+                    rotation = tf.quaternion_matrix(tf.quaternion_about_axis(angle, robot_axis))[:3, :3]
+                    np.testing.assert_allclose(target[:3, :3], rotation @ initial[:3, :3], atol=1e-12)
 
     def test_ik_respects_user_and_urdf_joint_velocity_limits(self):
         limits = {
@@ -92,8 +130,8 @@ class X2SimulationTests(unittest.TestCase):
             if joint.get("type") != "fixed"
         }
         for requested in (1.5, 4.0, 8.0, 20.0):
-            with self.subTest(velocity_limit=requested):
-                c = self.make_controller(velocity_limit=requested)
+            with self.subTest(arm_velocity_limit=requested):
+                c = self.make_controller(arm_velocity_limit=requested)
                 effective = {name: min(requested, limit) for name, limit in limits.items()}
                 for name, limit in effective.items():
                     offset = c.placo_robot.get_joint_v_offset(name)
@@ -112,17 +150,18 @@ class X2SimulationTests(unittest.TestCase):
                         speed = abs(c.placo_robot.get_joint(name) - previous[name]) / c.dt
                         self.assertLessEqual(speed, limit + 1e-6, name)
 
-    def test_invalid_velocity_limit_is_rejected_before_connecting_xr(self):
-        for value in (0.0, -1.0, np.nan, np.inf, -np.inf):
-            with (
-                self.subTest(velocity_limit=value),
-                patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
-            ):
-                with self.assertRaisesRegex(ValueError, "velocity_limit must be finite and positive"):
-                    AgibotX2TeleopController(
-                        str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), velocity_limit=value
-                    )
-                xr.assert_not_called()
+    def test_invalid_velocity_caps_are_rejected_before_connecting_xr(self):
+        for name in ("arm_velocity_limit", "hand_velocity_limit"):
+            for value in (0.0, -1.0, np.nan, np.inf, -np.inf):
+                with (
+                    self.subTest(parameter=name, value=value),
+                    patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+                ):
+                    with self.assertRaisesRegex(ValueError, f"{name} must be finite and positive"):
+                        AgibotX2TeleopController(
+                            str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), **{name: value}
+                        )
+                    xr.assert_not_called()
 
     def test_idle_and_position_actuator_tracking(self):
         c = self.make_controller()
@@ -163,7 +202,7 @@ class X2SimulationTests(unittest.TestCase):
         np.testing.assert_allclose(c.effector_task["left_arm"].T_world_frame[:3, 3], expected, atol=1e-8)
         for _ in range(50):
             c.step_control()
-        actual, _ = c._get_link_pose("left_wrist_roll_link")
+        actual, _ = c._get_link_pose("left_hand_center")
         self.assertLess(np.linalg.norm(actual - expected), 0.015)
         xr.grips["left_grip"] = 0
         c.step_control()
@@ -172,8 +211,8 @@ class X2SimulationTests(unittest.TestCase):
         for _ in range(20):
             c.step_control()
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
-        # Re-engagement targets the measured wrist at the new controller reference.
-        before, _ = c._get_link_pose("left_wrist_roll_link")
+        # Re-engagement targets the measured hand center at the new controller reference.
+        before, _ = c._get_link_pose("left_hand_center")
         xr.grips["left_grip"] = 1
         xr.grips["right_grip"] = 1
         c.step_control()
@@ -296,7 +335,7 @@ class X2SimulationTests(unittest.TestCase):
 
             # Tracking resumes at a new pose without replaying the old displacement.
             xr.poses["left_controller"][0] = 0.5
-            before, _ = c._get_link_pose("left_wrist_roll_link")
+            before, _ = c._get_link_pose("left_hand_center")
             xr.advance_timestamps = True
             c.step_control()
             self.assertTrue(c._ik_valid)
@@ -336,7 +375,7 @@ class X2SimulationTests(unittest.TestCase):
                 c.step_control()
                 self.assertFalse(c._ik_valid)
                 xr.advance_timestamps = True
-                before, _ = c._get_link_pose("left_wrist_roll_link")
+                before, _ = c._get_link_pose("left_hand_center")
                 c.step_control()
                 self.assertTrue(c._ik_valid)
                 np.testing.assert_allclose(c.effector_task["left_arm"].T_world_frame[:3, 3], before, atol=1e-8)
@@ -361,14 +400,14 @@ class X2SimulationTests(unittest.TestCase):
                 np.testing.assert_array_equal(c.mj_data.ctrl, held)
 
                 # Re-engage while the other controller still has invalid tracking.
-                before, _ = c._get_link_pose(f"{released_side}_wrist_roll_link")
+                before, _ = c._get_link_pose(f"{released_side}_hand_center")
                 xr.grips[f"{released_side}_grip"] = 1.0
                 c.step_control()
                 np.testing.assert_array_equal(c.mj_data.ctrl, held)
                 np.testing.assert_allclose(c.effector_task[name].T_world_frame[:3, 3], before, atol=1e-8)
 
                 xr.poses[f"{invalid_side}_controller"][0] = 0.0
-                before, _ = c._get_link_pose(f"{released_side}_wrist_roll_link")
+                before, _ = c._get_link_pose(f"{released_side}_hand_center")
                 c.step_control()
                 self.assertTrue(c._ik_valid)
                 np.testing.assert_allclose(c.effector_task[name].T_world_frame[:3, 3], before, atol=1e-8)
@@ -396,7 +435,7 @@ class X2SimulationTests(unittest.TestCase):
                 xr.poses[f"{invalid_side}_controller"][0] = 0.4
                 measured = {}
                 for side in ("left", "right"):
-                    xyz, quat = c._get_link_pose(f"{side}_wrist_roll_link")
+                    xyz, quat = c._get_link_pose(f"{side}_hand_center")
                     measured[side] = tf.quaternion_matrix(quat)
                     measured[side][:3, 3] = xyz
                 c.step_control()

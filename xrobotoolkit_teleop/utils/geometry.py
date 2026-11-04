@@ -1,6 +1,9 @@
 import numpy as np
 import meshcat.transformations as tf
 
+# Native XR tracking-world basis: +X right, +Y up, +Z backward (right-handed).
+# Robot world: +X forward, +Y left, +Z up. This is a fixed basis change;
+# it does not follow the current headset orientation.
 R_HEADSET_TO_WORLD = np.array(
     [
         [0, 0, -1],

@@ -1,0 +1,333 @@
+<mujoco model="omnihand_pro_right">
+  <worldbody>
+    <body name="R_palm" pos="0.0 0.1 0.0">
+      <geom class="plastic_visual" mesh="r_palm" />
+      <geom mesh="r_palm_col" class="plastic_collision" />
+      <body name="R_thumb_roll_link" pos="-0.00148 0.022278 0.04025" quat="0.636071 -0.77163 0 0">
+        <inertial pos="0.0238985 8.49276e-05 0.00143588"
+          quat="0.391834 0.919383 0.00345847 -0.0344663" mass="0.0487219"
+          diaginertia="1.16263e-05 6.90975e-06 6.30251e-06" />
+        <joint name="R_thumb_roll_joint" pos="0 0 0" axis="1 0 0" range="0 0.73"
+          class="hand_joint" damping="0.2"/>
+        <geom class="plastic_visual" mesh="r_thumb_roll" />
+        <geom class="plastic_collision" mesh="r_thumb_roll_col" />
+        <body name="R_thumb_abad_link" pos="0.029071 0 0.0033014" quat="0.852629 0 0.522517 0">
+          <inertial pos="0.00144112 -0.000769716 0.0110531"
+            quat="0.966035 -0.257709 -0.0179818 -0.00620373" mass="0.0052773"
+            diaginertia="5.14316e-07 3.63425e-07 2.0324e-07" />
+          <joint name="R_thumb_abad_joint" pos="0 0 0" axis="0 -1 0" range="-0.94 0"
+            class="hand_joint" damping="0.2"/>
+          <geom class="plastic_visual" mesh="r_thumb_abad" />
+          <geom class="plastic_collision" mesh="r_thumb_abad_col" />
+          <body name="R_thumb_mcp_link" pos="0.0016774 -0.0068611 0.022935"
+            quat="0.668432 0.230645 0.230644 -0.668435">
+            <inertial pos="0.0024892 0.000126945 0.0270125"
+              quat="0.709082 -0.00791289 -0.00660592 0.705051" mass="0.0238745"
+              diaginertia="1.13641e-05 9.14323e-06 2.85979e-06" />
+            <joint name="R_thumb_mcp_joint" pos="0 0 0" axis="0 -1 0" range="-0.85 0"
+              class="hand_joint" damping="0.2"/>
+            <geom class="plastic_visual" mesh="r_thumb_mcp" />
+            <geom mesh="r_thumb_mcp_col" class="plastic_collision" />
+
+            <body name="R_thumb_pip_link" pos="0.0067768 0 0.05582">
+              <inertial pos="-0.00238173 0.000356732 0.0132496"
+                quat="0.702476 -0.110347 -0.120396 0.692716" mass="0.0150898"
+                diaginertia="1.76945e-06 1.36842e-06 7.81944e-07" />
+              <joint name="R_thumb_pip_joint" pos="0 0 0" axis="0 -1 0" range="-1.29 0"
+                class="hand_joint" damping="0.1"/>
+              <geom class="plastic_visual" mesh="r_thumb_pip" />
+              <geom mesh="r_thumb_pip_col" class="plastic_collision" />
+              <body name="R_thumb_dip_link" pos="-0.0025791 0 0.034516">
+                <site name="R_thumb_tactile_sit" pos="0.0018 0 0.025"
+                  quat="0 -0.3826834 0 0.9238795" type="box"
+                  size="0.004 0.008 0.012" group="3" />
+                <inertial pos="-0.00103339 -4.3547e-07 0.011176"
+                  quat="0.985707 -6.06797e-05 0.168466 -9.99765e-05" mass="0.0166288"
+                  diaginertia="1.64923e-06 1.43183e-06 7.93396e-07" />
+                <joint name="R_thumb_dip_joint" pos="0 0 0" axis="0 -1 0" range="-1.31 0"
+                  class="hand_joint" damping="0.1"/>
+                <geom class="plastic_visual" mesh="r_thumb_dip" />
+                <geom class="plastic_collision" mesh="thumb_tip" />
+                <body name="R_thumb_tip" pos="-0.01107 0 0.02778">
+                  <geom size="0.001" contype="0" conaffinity="0" group="3" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="R_index_abad_link" pos="-0.0134 0.030778 0.11936">
+        <inertial pos="0.00904689 2.37542e-06 0.0029644" quat="0.665921 0.666099 -0.2378 0.237302"
+          mass="0.00769184" diaginertia="3.4067e-07 2.69715e-07 1.96446e-07" />
+        <joint name="R_index_abad_joint" pos="0 0 0" axis="1 0 0" limited="false" range="-0.26 0.26"
+          class="hand_joint" damping="0.2"/>
+        <geom class="plastic_visual" mesh="index_abad" />
+        <body name="R_index_mcp_link" pos="0.01357 0 0">
+          <inertial pos="-0.00199826 2.64457e-05 0.0201667"
+            quat="0.705807 0.0245347 0.0239679 0.707573" mass="0.00942127"
+            diaginertia="1.34371e-06 1.23388e-06 3.57177e-07" />
+          <joint name="R_index_mcp_joint" pos="0 0 0" axis="0 1 0" range="0 1.33"
+            class="hand_joint" damping="0.2"/>
+          <geom class="plastic_visual" mesh="index_mcp" />
+          <geom mesh="index_mcp_col" class="plastic_collision" />
+          <body name="R_index_pip_link" pos="-0.0044047 0 0.039781">
+            <inertial pos="0.000915278 2.4482e-05 0.0134566"
+              quat="0.995585 -0.000389063 -0.0938568 0.00092998" mass="0.00438957"
+              diaginertia="3.96035e-07 3.39842e-07 2.28756e-07" />
+            <joint name="R_index_pip_joint" pos="0 0 0" axis="0 1 0" range="0 1.48"
+              class="hand_joint" damping="0.15"/>
+            <geom class="plastic_visual" mesh="index_pip" />
+            <geom mesh="index_pip_col" class="plastic_collision" />
+            <body name="R_index_dip_link" pos="0.0058514 0 0.026478">
+              <site name="R_index_tactile_sit" pos="-0.006 0 0.015" quat="0 -0.3826834 0 0.9238795"
+                type="box" size="0.007 0.008 0.012" group="3" />
+              <inertial pos="-0.00788424 1.62613e-05 0.00734904"
+                quat="0.982693 -0.000634148 0.184712 -0.013961" mass="0.00919994"
+                diaginertia="6.74101e-07 6.3367e-07 2.43684e-07" />
+              <joint name="R_index_dip_joint" pos="0 0 0" axis="0 1 0" range="0 1.31"
+                class="hand_joint" damping="0.15"/>
+              <geom class="plastic_visual" mesh="index_dip" />
+              <geom class="plastic_collision" mesh="finger_tip" />
+              <body name="R_index_tip" pos="-0.01465 0 0.02533">
+                <geom size="0.001" contype="0" conaffinity="0" group="3" />
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="R_middle_abad_link" pos="-0.0134 0.0066607 0.11936">
+        <inertial pos="0.00886137 3.75661e-09 0.00266833" quat="0.628111 0.6281 -0.324791 0.324772"
+          mass="0.00637103" diaginertia="2.76199e-07 2.24278e-07 1.58576e-07" />
+        <joint name="R_middle_abad_joint" pos="0 0 0" axis="1 0 0" limited="false"
+          range="-0.26 0.26" class="hand_joint" damping="0.2"/>
+        <geom class="plastic_visual" mesh="middle_abad" />
+        <body name="R_middle_mcp_link" pos="0.01337 0 0">
+          <inertial pos="-0.00165477 2.2098e-06 0.0225332"
+            quat="0.706181 0.016237 0.0155587 0.707674" mass="0.0105446"
+            diaginertia="1.85662e-06 1.73308e-06 4.18706e-07" />
+          <joint name="R_middle_mcp_joint" pos="0 0 0" axis="0 1 0" range="0 1.33"
+            class="hand_joint" damping="0.2"/>
+          <geom class="plastic_visual" mesh="middle_mcp" />
+          <geom mesh="middle_mcp_col" class="plastic_collision" />
+          <body name="R_middle_pip_link" pos="-0.0040396 0 0.044837">
+            <inertial pos="0.000830746 -4.34482e-05 0.0161493"
+              quat="0.997281 0.000178032 -0.0736915 -0.000416892" mass="0.00495729"
+              diaginertia="5.54887e-07 4.9146e-07 2.56507e-07" />
+            <joint name="R_middle_pip_joint" pos="0 0 0" axis="0 1 0" range="0 1.71"
+              class="hand_joint" damping="0.15"/>
+            <geom class="plastic_visual" mesh="middle_pip" />
+            <geom mesh="middle_pip_col" class="plastic_collision" />
+            <body name="R_middle_dip_link" pos="0.005529 0 0.031336">
+              <site name="R_middle_tactile_sit" pos="-0.006 0 0.015" quat="0 -0.3826834 0 0.9238795"
+                type="box" size="0.004 0.008 0.012" group="3" />
+              <inertial pos="-0.00783632 -0.000103679 0.00740013"
+                quat="0.983293 -0.000520157 0.181518 -0.0136466" mass="0.00919992"
+                diaginertia="6.74098e-07 6.33664e-07 2.43677e-07" />
+              <joint name="R_middle_dip_joint" pos="0 0 0" axis="0 1 0" range="0 1.31"
+                class="hand_joint" damping="0.15"/>
+              <geom class="plastic_visual" mesh="middle_dip" />
+              <geom class="plastic_collision" mesh="finger_tip" />
+              <body name="R_middle_tip" pos="-0.01465 0 0.02533">
+                <geom size="0.001" contype="0" conaffinity="0" group="3" />
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="R_ring_mcp_link" pos="0.0001598 -0.013518 0.11972">
+        <inertial pos="-0.00161802 -2.0822e-05 0.0212342"
+          quat="0.999359 9.53848e-05 -0.0333935 -0.0128948" mass="0.00477953"
+          diaginertia="5.45577e-07 5.41638e-07 1.7485e-07" />
+        <joint name="R_ring_mcp_joint" pos="0 0 0" axis="0 1 0" range="0 1.38"
+          class="hand_joint" damping="0.15"/>
+        <geom class="plastic_visual" mesh="ring_mcp" />
+        <geom class="plastic_collision" mesh="ring_mcp_col" />
+        <body name="R_ring_pip_link" pos="-0.0039371 0 0.03983">
+          <inertial pos="0.000940341 -1.66668e-05 0.0134216"
+            quat="0.999942 -0.000103876 -0.0107411 3.34326e-05" mass="0.00477953"
+            diaginertia="2.25818e-07 1.61876e-07 1.1765e-07" />
+          <joint name="R_ring_pip_joint" pos="0 0 0" axis="0 1 0" range="0 1.57"
+            class="hand_joint" damping="0.15"/>
+          <geom class="plastic_visual" mesh="ring_pip" />
+          <geom class="plastic_collision" mesh="ring_pip_col" />
+          <body name="R_ring_dip_link" pos="0.006162 0 0.026407">
+            <site name="R_ring_tactile_sit" pos="-0.006 0 0.017" quat="0 -0.3826834 0 0.9238795"
+              type="box" size="0.004 0.008 0.012" group="3" />
+            <inertial pos="-0.00779751 2.51161e-05 0.00744106"
+              quat="0.983766 -0.000439343 0.178945 -0.0135322" mass="0.00919994"
+              diaginertia="6.74102e-07 6.33662e-07 2.43671e-07" />
+            <joint name="R_ring_dip_joint" pos="0 0 0" axis="0 1 0" range="0 1.31"
+              class="hand_joint" damping="0.15"/>
+            <geom class="plastic_visual" mesh="ring_dip" />
+            <geom class="plastic_collision" mesh="finger_tip" />
+            <body name="R_ring_tip" pos="-0.01465 0 0.02533">
+              <geom size="0.001" contype="0" conaffinity="0" group="3" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="R_pinky_mcp_link" pos="0.0001598 -0.033576 0.11272">
+        <inertial pos="-0.00161802 -2.0822e-05 0.0212342"
+          quat="0.999359 9.53848e-05 -0.0333935 -0.0128948" mass="0.00477953"
+          diaginertia="5.45577e-07 5.41638e-07 1.7485e-07" />
+        <joint name="R_pinky_mcp_joint" pos="0 0 0" axis="0 1 0" range="0 1.38"
+          class="hand_joint" damping="0.15"/>
+        <geom class="plastic_visual" mesh="ring_mcp" />
+        <geom class="plastic_collision" mesh="ring_mcp_col" />
+        <body name="R_pinky_pip_link" pos="-0.0039371 0 0.03983">
+          <inertial pos="0.000940341 -1.66668e-05 0.0134216"
+            quat="0.999942 -0.000103876 -0.0107411 3.34326e-05" mass="0.00477953"
+            diaginertia="2.25818e-07 1.61876e-07 1.1765e-07" />
+          <joint name="R_pinky_pip_joint" pos="0 0 0" axis="0 1 0" range="0 1.57"
+            class="hand_joint" damping="0.15"/>
+          <geom class="plastic_visual" mesh="ring_pip" />
+          <geom class="plastic_collision" mesh="ring_pip_col" />
+          <body name="R_pinky_dip_link" pos="0.006162 0 0.026407">
+            <site name="R_pinky_tactile_sit" pos="-0.006 0 0.017" quat="0 -0.3826834 0 0.9238795"
+              type="box" size="0.004 0.008 0.012" group="3" />
+            <inertial pos="-0.00779751 2.51161e-05 0.00744106"
+              quat="0.983766 -0.000439343 0.178945 -0.0135322" mass="0.00919994"
+              diaginertia="6.74102e-07 6.33662e-07 2.43671e-07" />
+            <joint name="R_pinky_dip_joint" pos="0 0 0" axis="0 1 0" range="0 1.31"
+              class="hand_joint" damping="0.15"/>
+            <geom class="plastic_visual" mesh="ring_dip" />
+            <geom class="plastic_collision" mesh="finger_tip" />
+            <body name="R_pinky_tip" pos="-0.01465 0 0.02533">
+              <geom size="0.001" contype="0" conaffinity="0" group="3" />
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <!-- thumb  -->
+    <exclude body1="R_palm" body2="R_thumb_roll_link" />
+    <exclude body1="R_thumb_roll_link" body2="R_thumb_abad_link" />
+    <exclude body1="R_palm" body2="R_thumb_abad_link" />
+    <exclude body1="R_thumb_abad_link" body2="R_thumb_mcp_link" />
+    <exclude body1="R_thumb_mcp_link" body2="R_thumb_pip_link" />
+    <exclude body1="R_thumb_pip_link" body2="R_thumb_dip_link" />
+
+    <!-- index  -->
+    <exclude body1="R_palm" body2="R_index_abad_link" />
+    <exclude body1="R_index_abad_link" body2="R_index_mcp_link" />
+    <exclude body1="R_palm" body2="R_index_mcp_link" />
+    <exclude body1="R_index_mcp_link" body2="R_index_pip_link" />
+    <exclude body1="R_index_pip_link" body2="R_index_dip_link" />
+
+    <!-- middle -->
+    <exclude body1="R_palm" body2="R_middle_abad_link" />
+    <exclude body1="R_middle_abad_link" body2="R_middle_mcp_link" />
+    <exclude body1="R_palm" body2="R_middle_mcp_link" />
+    <exclude body1="R_middle_mcp_link" body2="R_middle_pip_link" />
+    <exclude body1="R_middle_pip_link" body2="R_middle_dip_link" />
+
+    <!-- ring finger -->
+    <exclude body1="R_palm" body2="R_ring_mcp_link" />
+    <exclude body1="R_ring_mcp_link" body2="R_ring_pip_link" />
+    <exclude body1="R_ring_pip_link" body2="R_ring_dip_link" />
+
+    <!-- pinky -->
+    <exclude body1="R_palm" body2="R_pinky_mcp_link" />
+    <exclude body1="R_pinky_mcp_link" body2="R_pinky_pip_link" />
+    <exclude body1="R_pinky_pip_link" body2="R_pinky_dip_link" />
+  </contact>
+
+  <actuator>
+    <!-- Thumb -->
+    <position name="R_thumb_roll_actuator" joint="R_thumb_roll_joint"
+      ctrlrange="0.0 0.73"
+      forcerange="-0.134 0.134" kp="100" />
+
+    <position name="R_thumb_abad_actuator" joint="R_thumb_abad_joint" ctrlrange="-0.94 0"
+      forcerange="-0.317 0.317" kp="100" />
+
+    <position name="R_thumb_mcp_actuator" joint="R_thumb_mcp_joint" ctrlrange="-0.85 0"
+      forcerange="-0.8 0.8" kp="100" />
+
+    <position name="R_thumb_pip_actuator" joint="R_thumb_pip_joint" ctrlrange="-1.29 0"
+      forcerange="-0.92 0.92" kp="100" />
+
+    <!-- Index -->
+    <position name="R_index_abad_actuator" joint="R_index_abad_joint" ctrlrange="-0.26 0.26"
+      forcerange="-1.0 1.0" kp="100" />
+
+    <position name="R_index_mcp_actuator" joint="R_index_mcp_joint" ctrlrange="0 1.33"
+      forcerange="-0.42 0.42" kp="100" />
+
+    <position name="R_index_pip_actuator" joint="R_index_pip_joint" ctrlrange="0 1.48"
+      forcerange="-0.216 0.216" kp="150" />
+
+    <!-- Middle -->
+    <position name="R_middle_abad_actuator" joint="R_middle_abad_joint" ctrlrange="-0.26 0.26"
+      forcerange="-1.0 1.0" kp="100" />
+
+    <position name="R_middle_mcp_actuator" joint="R_middle_mcp_joint" ctrlrange="0 1.33"
+      forcerange="-0.413 0.413" kp="100" />
+
+    <position name="R_middle_pip_actuator" joint="R_middle_pip_joint" ctrlrange="0 1.71"
+      forcerange="-0.136 0.136" kp="150" />
+
+    <!-- Ring -->
+    <position name="R_ring_mcp_actuator" joint="R_ring_mcp_joint" ctrlrange="0 1.38"
+      forcerange="-0.444 0.444" kp="150" />
+
+    <!-- Pinky -->
+    <position name="R_pinky_mcp_actuator" joint="R_pinky_mcp_joint" ctrlrange="0 1.38"
+      forcerange="-0.444 0.444" kp="150" />
+
+  </actuator>
+
+  <equality>
+    <!-- thumb -->
+    <joint name="R_thumb_dip_equality" joint1="R_thumb_dip_joint" joint2="R_thumb_pip_joint"
+      polycoef="0 0.6359 -0.3539 -0.3066 -0.124" />
+    <!-- index -->
+    <joint name="R_index_dip_equality" joint1="R_index_dip_joint" joint2="R_index_pip_joint"
+      polycoef="0.0  1.063 0.08942 0.1845 -0.2169" />
+    <!-- middle -->
+    <joint name="R_middle_dip_equality" joint1="R_middle_dip_joint" joint2="R_middle_pip_joint"
+      polycoef="0.0  1.149 -0.2581 0.6033 -0.3371" />
+    <!-- ring -->
+    <joint name="R_ring_pip_equality" joint1="R_ring_pip_joint" joint2="R_ring_mcp_joint"
+      polycoef="0.0  0.7869 0.3884 -0.4545 0.1578" />
+    <joint name="R_ring_dip_equality" joint1="R_ring_dip_joint" joint2="R_ring_mcp_joint"
+      polycoef="0.0  0.899 0.3138 -0.1728 -0.03666" />
+    <!-- pinky -->
+    <joint name="R_pinky_pip_equality" joint1="R_pinky_pip_joint" joint2="R_pinky_mcp_joint"
+      polycoef="0.0  0.7869 0.3884 -0.4545 0.1578" />
+    <joint name="R_pinky_dip_equality" joint1="R_pinky_dip_joint" joint2="R_pinky_mcp_joint"
+      polycoef="0.0  0.899 0.3138 -0.1728 -0.03666" />
+  </equality>
+
+  <sensor>
+    <!-- joint position sensor -->
+    <!-- thumb  -->
+    <actuatorpos name="R_thumb_roll_actuatorpos" actuator="R_thumb_roll_actuator" />
+    <actuatorpos name="R_thumb_abad_actuatorpos" actuator="R_thumb_abad_actuator" />
+    <actuatorpos name="R_thumb_mcp_actuatorpos" actuator="R_thumb_mcp_actuator" />
+    <actuatorpos name="R_thumb_pip_actuatorpos" actuator="R_thumb_pip_actuator" />
+    <!-- index  -->
+    <actuatorpos name="R_index_abad_actuatorpos" actuator="R_index_abad_actuator" />
+    <actuatorpos name="R_index_mcp_actuatorpos" actuator="R_index_mcp_actuator" />
+    <actuatorpos name="R_index_pip_actuatorpos" actuator="R_index_pip_actuator" />
+    <!-- middle  -->
+    <actuatorpos name="R_middle_abad_actuatorpos" actuator="R_middle_abad_actuator" />
+    <actuatorpos name="R_middle_mcp_actuatorpos" actuator="R_middle_mcp_actuator" />
+    <actuatorpos name="R_middle_pip_actuatorpos" actuator="R_middle_pip_actuator" />
+    <!-- ring  -->
+    <actuatorpos name="R_ring_mcp_actuatorpos" actuator="R_ring_mcp_actuator" />
+    <!-- pinky  -->
+    <actuatorpos name="R_pinky_mcp_actuatorpos" actuator="R_pinky_mcp_actuator" />
+
+    <!-- finger tips tactile sensor -->
+    <touch name="R_thumb_tactile" site="R_thumb_tactile_sit" />
+    <touch name="R_index_tactile" site="R_index_tactile_sit" />
+    <touch name="R_middle_tactile" site="R_middle_tactile_sit" />
+    <touch name="R_ring_tactile" site="R_ring_tactile_sit" />
+    <touch name="R_pinky_tactile" site="R_pinky_tactile_sit" />
+
+  </sensor>
+</mujoco>

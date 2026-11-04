@@ -150,6 +150,7 @@
                           <inertial pos="0.002935 -0.001499 -0.083026" quat="0.606338 0.022665 0.0055862 0.794865" mass="0.30304" diaginertia="0.00278114 0.00266331 0.000205545" />
                           <joint name="left_wrist_roll_joint" pos="0 0 0" axis="1 0 0" range="-1.5097 0.724" actuatorfrcrange="-4.8 4.8" damping="0.2" />
                           <geom class="visual" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="left_wrist_roll_link" />
+                          <body name="left_hand_center" pos="0.00658717006444931 -0.009362391196191311 -0.0826008003205061" />
                         </body>
                       </body>
                     </body>
@@ -185,6 +186,7 @@
                           <inertial pos="0.003056 0.00138 -0.082799" quat="0.794575 0.00682121 0.0232843 0.606681" mass="0.303847" diaginertia="0.002781 0.00266288 0.000206121" />
                           <joint name="right_wrist_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.724 1.5097" actuatorfrcrange="-4.8 4.8" damping="0.2" />
                           <geom class="visual" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.898039 0.917647 0.929412 1" mesh="right_wrist_roll_link" />
+                          <body name="right_hand_center" pos="0.006716521456837654 0.009219083935022354 -0.08261105231940746" />
                         </body>
                       </body>
                     </body>

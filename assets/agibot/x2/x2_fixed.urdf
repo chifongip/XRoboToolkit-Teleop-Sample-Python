@@ -823,4 +823,16 @@
     <child link="base_link" />
     <origin xyz="0 0 0.68" rpy="0 0 0" />
   </joint>
+  <link name="left_hand_center" />
+  <joint name="left_hand_center_joint" type="fixed">
+    <parent link="left_wrist_roll_link" />
+    <child link="left_hand_center" />
+    <origin xyz="0.00658717006444931 -0.009362391196191311 -0.0826008003205061" rpy="0 0 0" />
+  </joint>
+  <link name="right_hand_center" />
+  <joint name="right_hand_center_joint" type="fixed">
+    <parent link="right_wrist_roll_link" />
+    <child link="right_hand_center" />
+    <origin xyz="0.006716521456837654 0.009219083935022354 -0.08261105231940746" rpy="0 0 0" />
+  </joint>
 </robot>

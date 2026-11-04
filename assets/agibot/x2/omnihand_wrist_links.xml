@@ -1,0 +1,58 @@
+<?xml version='1.0' encoding='utf-8'?>
+<wrist_links>
+  <!--Source: X2_URDF-v1.4.0/X2-Ultra_omnihand.urdf; URDF link excerpts, not a standalone robot.-->
+  <link name="left_wrist_roll_link">
+    <inertial>
+      <origin xyz="-0.00260566 -0.00028957 -0.02690918" rpy="0 0 0" />
+      <mass value="0.081" />
+      <inertia ixx="0.00005239" ixy="-0.00000010" ixz="0.00000245" iyy=" 0.00011762" iyz="-0.00000066" izz=" 0.00007906" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="./meshes/left_wrist_roll_link10.stl" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="./meshes/left_wrist_roll_link10.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="right_wrist_roll_link">
+    <inertial>
+      <origin xyz="-0.00242778  0.00027941 -0.02697696" rpy="0 0 0" />
+      <mass value="0.081" />
+      <inertia ixx="0.00005226" ixy="0.00000011" ixz="0.00000229" iyy=" 0.00011702" iyz="0.00000064" izz="0.00007859" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="./meshes/right_wrist_roll_link2.stl" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="./meshes/right_wrist_roll_link2.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_palm_joint" type="fixed">
+    <origin rpy="0 3.14 1.58" xyz="0.00 -0.001 -0.049" />
+    <parent link="left_wrist_roll_link" />
+    <child link="L_palm" />
+  </joint>
+  <joint name="R_palm_joint" type="fixed">
+    <origin rpy="0.0 3.14 -1.58" xyz="0.00 0.001 -0.049" />
+    <parent link="right_wrist_roll_link" />
+    <child link="R_palm" />
+  </joint>
+</wrist_links>

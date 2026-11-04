@@ -13,7 +13,10 @@ class XrClient:
     def get_pose_by_name(self, name: str) -> np.ndarray:
         """Returns the pose of the specified device by name.
         Valid names: "left_controller", "right_controller", "headset".
-        Pose is [x, y, z, qx, qy, qz, qw]."""
+        Pose is [x, y, z, qx, qy, qz, qw], passed through from the SDK.
+        The teleoperation adapter expects native XR tracking-world axes:
+        +X right, +Y up, +Z backward; positions are in meters.
+        """
         if name == "left_controller":
             return xrt.get_left_controller_pose()
         elif name == "right_controller":

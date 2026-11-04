@@ -57,17 +57,39 @@ python scripts/simulation/teleop_agibot_x2_mujoco.py
 ```
 
 The bundled X2 v1.3.0 model keeps the pelvis, legs, waist, and head fixed. Hold
-the left or right **grip** to control the corresponding wrist's position and
+the left or right **grip** to control the corresponding hand center's position and
 orientation using controller motion in the fixed VR tracking world frame.
-Moving your head alone leaves the wrist targets unchanged. Turning your body
+Moving your head alone leaves the hand targets unchanged. Turning your body
 while gripping moves the targets if it changes the controllers' world poses.
 Release to hold its last joint command; press again to start from
-the current controller pose. Both arms can move simultaneously. Trigger buttons
-have no assigned action because this model has no finger joints.
+the current controller pose. Both arms can move simultaneously.
+
+To attach both Omnihand Pro hands, use:
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand
+```
+
+Each **trigger** continuously closes its corresponding hand; release it to open.
+Fingers work independently of the arm grips. The hands retain their nonlinear
+finger coupling, mass, and inertia, with contacts disabled. This mode demonstrates
+hand motion without object grasping. The default arm-only model assigns no trigger
+action. Placo visualization continues to show the arm-only IK model; MuJoCo shows
+the hands. See [hand asset provenance](assets/omnihand_pro/README.md).
+
+Both modes use `left_hand_center` and `right_hand_center` for IK and target
+markers. These fixed frames sit at the bounding-box centers of the rigid hand
+meshes in default mode, or the palm meshes with Omnihand Pro enabled. Their axes
+remain parallel to the wrist-roll frames. Finger motion does not move the frame
+within the hand. The Omnihand option automatically selects its matching
+`x2_omnihand_ik.urdf`; custom scenes require a URDF with matching center frames.
 
 Use `--scale-factor 0.5` for smaller translation movements, or
 `--visualize-placo` to also open the IK visualization. `--xml-path` and
-`--robot-urdf-path` accept matching alternative fixed-body models. Close the
+`--robot-urdf-path` accept matching alternative fixed-body models. Use a custom
+`--xml-path` separately from `--with-omnihand`. Alternative models must use the
+same 14 arm joints, optionally with both Omnihand Pro hands, and joint position servos
+with unit gear. Close the
 MuJoCo viewer or press Ctrl-C to exit. A graphical desktop is needed for the
 viewer; the headless checks below require neither a headset nor PC Service.
 
@@ -75,17 +97,50 @@ viewer; the headless checks below require neither a headset nor PC Service.
 python -m unittest discover -s tests -v
 ```
 
-The demo runs control at 100 Hz with 1 ms physics steps. Set the IK joint speed
-cap with `--velocity-limit 2.0` (rad/s; default 8.0). Each joint uses the lower of
-this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
+The demo runs control at 100 Hz with 1 ms physics steps. Set the arm IK joint
+speed cap with `--arm-velocity-limit 2.0` (rad/s; default 8.0). Each arm joint
+uses the lower of this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
 shoulder pitch/roll, and 15.077 rad/s for shoulder yaw, elbows, and wrist yaw).
+With Omnihand Pro, `--hand-velocity-limit` separately caps actuated finger target
+speeds (rad/s; default 2.0), also bounded by each joint's supplied hand URDF limit.
+The former `--velocity-limit` option is now `--arm-velocity-limit`.
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand --arm-velocity-limit 4.0 --hand-velocity-limit 1.0
+```
+
+Finger position commands ramp together toward trigger targets, including after
+stream recovery. Each hand uses a common progress step bounded by its slowest
+moving joint, keeping the thumb and fingers coordinated during reversals.
+This bounds commanded speeds, not actual physics velocities; passive
+fingers still follow their coupling constraints and have no separate speed clamp.
 Control requires an advancing XR stream timestamp. If it stops advancing for
 250 ms, joint commands hold and clutch references reset; tracking recovery starts
-from the measured wrist poses. The SDK exposes a shared stream timestamp, so
+from the measured hand-center poses. Omnihand Pro commands also hold during stream outages;
+fresh packets resume trigger control. Non-finite trigger values hold only the
+affected hand, and finite values are clamped to the trigger's 0–1 range.
+The SDK exposes a shared stream timestamp, so
 this watchdog detects stream outages, not individual devices dropping out while
 other packets continue arriving. Invalid active controller poses also hold
 both arms' commands and reset both clutch references, so recovery discards
 controller motion made during the hold. Headset pose data is not used for arm control.
+
+The XR adapter expects native PICO tracking-world coordinates: +X right, +Y up,
++Z backward, with poses `[x, y, z, qx, qy, qz, qw]` and positions in meters.
+Robot coordinates are +X forward, +Y left, +Z up. The fixed conversion is
+`[robot_x, robot_y, robot_z] = [-vr_z, -vr_x, vr_y]`; rotations use the same
+basis change. Thus moving a controller forward, right, or up moves its hand
+forward, right, or up relative to the initial tracking-world alignment.
+Both controllers use this same convention, and turning the headset does not
+rotate the mapping. Clutching preserves the hand's initial orientation and
+applies controller rotation changes, rather than imposing its absolute pose.
+
+The upstream PC Service README inconsistently labels headset and controller
+handedness. The [Unity sender](https://github.com/XR-Robotics/XRoboToolkit-Unity-Client/blob/main/Assets/Scripts/TrackingData.cs)
+serializes the native predicted controller poses, and the
+[Python binding](https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind/blob/main/bindings/py_bindings.cpp)
+parses them without an axis conversion. This verifies the source-level mapping;
+the installed headset app's behavior still requires a live direction check.
 
 This is simulation only, without self-collision avoidance,
 grasping, or locomotion. See [model provenance and limitations](assets/agibot/x2/README.md).
