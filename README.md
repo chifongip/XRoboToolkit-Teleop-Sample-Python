@@ -47,6 +47,49 @@ To run the teleoperation demo with dual Agilex Piper robotic arms in MuJoCo simu
 python scripts/simulation/teleop_dual_piper_mujoco.py
 ```
 
+### Agibot X2 fixed-base dual-arm simulation
+
+Activate the installed environment (for example, `conda activate xr-robotics`),
+start XRoboToolkit PC Service, and connect the headset and two VR controllers:
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py
+```
+
+The bundled X2 v1.3.0 model keeps the pelvis, legs, waist, and head fixed. Hold
+the left or right **grip** to control the corresponding wrist's position and
+orientation using controller motion in the fixed VR tracking world frame.
+Moving your head alone leaves the wrist targets unchanged. Turning your body
+while gripping moves the targets if it changes the controllers' world poses.
+Release to hold its last joint command; press again to start from
+the current controller pose. Both arms can move simultaneously. Trigger buttons
+have no assigned action because this model has no finger joints.
+
+Use `--scale-factor 0.5` for smaller translation movements, or
+`--visualize-placo` to also open the IK visualization. `--xml-path` and
+`--robot-urdf-path` accept matching alternative fixed-body models. Close the
+MuJoCo viewer or press Ctrl-C to exit. A graphical desktop is needed for the
+viewer; the headless checks below require neither a headset nor PC Service.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The demo runs control at 100 Hz with 1 ms physics steps. Set the IK joint speed
+cap with `--velocity-limit 2.0` (rad/s; default 8.0). Each joint uses the lower of
+this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
+shoulder pitch/roll, and 15.077 rad/s for shoulder yaw, elbows, and wrist yaw).
+Control requires an advancing XR stream timestamp. If it stops advancing for
+250 ms, joint commands hold and clutch references reset; tracking recovery starts
+from the measured wrist poses. The SDK exposes a shared stream timestamp, so
+this watchdog detects stream outages, not individual devices dropping out while
+other packets continue arriving. Invalid active controller poses also hold
+both arms' commands and reset both clutch references, so recovery discards
+controller motion made during the hold. Headset pose data is not used for arm control.
+
+This is simulation only, without self-collision avoidance,
+grasping, or locomotion. See [model provenance and limitations](assets/agibot/x2/README.md).
+
 ### Running the Placo Visualization Demo
 
 To run the teleoperation demo with a UR5e robot in Placo visualization:

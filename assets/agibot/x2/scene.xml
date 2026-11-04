@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="X2 dual arm teleoperation">
+  <include file="x2_fixed.xml" />
+  <statistic center="0 0 0.7" extent="1.5" />
+  <visual>
+    <global azimuth="135" elevation="-20" />
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.8 0.8 0.8" />
+  </visual>
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 .15 .2" width="256" height="256" />
+    <material name="grid" texture="grid" texrepeat="3 3" texuniform="true" />
+  </asset>
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" />
+    <geom name="floor" type="plane" size="2 2 .01" material="grid" />
+    <body name="left_target" mocap="true">
+      <geom name="left_target_x" type="cylinder" size=".003 .03" pos=".03 0 0" zaxis="1 0 0" rgba="1 0 0 1" contype="0" conaffinity="0" />
+      <geom name="left_target_y" type="cylinder" size=".003 .03" pos="0 .03 0" zaxis="0 1 0" rgba="0 1 0 1" contype="0" conaffinity="0" />
+      <geom name="left_target_z" type="cylinder" size=".003 .03" pos="0 0 .03" zaxis="0 0 1" rgba="0 0 1 1" contype="0" conaffinity="0" />
+    </body>
+    <body name="right_target" mocap="true">
+      <geom name="right_target_x" type="cylinder" size=".003 .03" pos=".03 0 0" zaxis="1 0 0" rgba="1 0 0 1" contype="0" conaffinity="0" />
+      <geom name="right_target_y" type="cylinder" size=".003 .03" pos="0 .03 0" zaxis="0 1 0" rgba="0 1 0 1" contype="0" conaffinity="0" />
+      <geom name="right_target_z" type="cylinder" size=".003 .03" pos="0 0 .03" zaxis="0 0 1" rgba="0 0 1 1" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+</mujoco>
