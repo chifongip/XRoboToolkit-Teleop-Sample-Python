@@ -16,7 +16,7 @@ from numpy.polynomial.polynomial import polyval
 from xrobotoolkit_teleop.simulation.agibot_x2_hand_config import HAND_CLOSED
 from xrobotoolkit_teleop.simulation.mujoco_teleop_controller import MujocoTeleopController
 from xrobotoolkit_teleop.utils.collision_checks import CollisionChecker
-from xrobotoolkit_teleop.utils.geometry import apply_delta_pose
+from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, apply_delta_pose
 from xrobotoolkit_teleop.utils.mujoco_utils import calc_placo_q_from_mujoco_qpos
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
 
@@ -75,6 +75,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         }
         self._ik_valid = False
         self._stream_fresh = False
+        self._heading_captured = False
         try:
             super().__init__(
                 xml_path=xml_path,
@@ -284,6 +285,12 @@ class AgibotX2TeleopController(MujocoTeleopController):
                 ordered.append((target, source, coefficients))
         self.hand_couplings = ordered
 
+    def _reset_clutch_reference(self, name):
+        self.ref_ee_xyz[name] = None
+        self.ref_ee_quat[name] = None
+        self.ref_controller_xyz[name] = None
+        self.ref_controller_quat[name] = None
+
     def _update_ik(self):
         self._update_robot_state()
         self.collision_checker.clear_cache()
@@ -291,27 +298,33 @@ class AgibotX2TeleopController(MujocoTeleopController):
         stream_fresh = self._xr_stream_is_fresh()
         self._stream_fresh = stream_fresh
         if self.xr_client.get_button_state_by_name("Y"):
+            self._heading_captured = False
             self._update_return_to_default(stream_fresh)
             return
-        tracking_valid = stream_fresh
+        # A session lasts until both grips are released. Share one fixed heading
+        # so staggered arm engagement cannot assign different axes to each hand.
         for name, config in self.manipulator_config.items():
             grip = self.xr_client.get_key_value_by_name(config["control_trigger"])
             self.active[name] = np.isfinite(grip) and grip > 0.9
+        any_active = any(self.active.values())
+        if not any_active:
+            self._heading_captured = False
+        elif stream_fresh and not self._heading_captured:
+            self._heading_captured = self._capture_control_heading()
+
+        tracking_valid = stream_fresh
+        for name, config in self.manipulator_config.items():
             for joint in self.arm_joints[name]:
                 if self.active[name]:
                     self.solver.unmask_dof(joint)
                 else:
                     self.solver.mask_dof(joint)
             if not self.active[name]:
-                self.ref_ee_xyz[name] = None
-                self.ref_controller_xyz[name] = None
+                self._reset_clutch_reference(name)
                 continue
 
             pose = self._read_valid_xr_pose(config["pose_source"])
-            if not stream_fresh or pose is None:
-                # Drop the reference so resumed tracking also starts without a jump.
-                self.ref_ee_xyz[name] = None
-                self.ref_controller_xyz[name] = None
+            if not stream_fresh or pose is None or not self._heading_captured:
                 tracking_valid = False
                 continue
             if self.ref_ee_xyz[name] is None:
@@ -327,12 +340,9 @@ class AgibotX2TeleopController(MujocoTeleopController):
             # Both arms hold, so discard motion from both controllers on every
             # invalid cycle. Recovery rebases each hand center at its measured pose.
             for name in self.manipulator_config:
-                self.ref_ee_xyz[name] = None
-                self.ref_ee_quat[name] = None
-                self.ref_controller_xyz[name] = None
-                self.ref_controller_quat[name] = None
+                self._reset_clutch_reference(name)
             return
-        if not any(self.active.values()):
+        if not any_active:
             return
         previous = self.placo_robot.state.q.copy()
         recovery_constraint = None
@@ -374,10 +384,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         """Hold Y to approach the home keyframe through checked joint steps."""
         for name in self.manipulator_config:
             self.active[name] = True
-            self.ref_ee_xyz[name] = None
-            self.ref_ee_quat[name] = None
-            self.ref_controller_xyz[name] = None
-            self.ref_controller_quat[name] = None
+            self._reset_clutch_reference(name)
         if not stream_fresh or any(
             self._read_valid_xr_pose(config["pose_source"]) is None for config in self.manipulator_config.values()
         ):
@@ -637,6 +644,24 @@ class AgibotX2TeleopController(MujocoTeleopController):
             self._last_xr_timestamp_ns = timestamp
             self._last_xr_update_at = now
         return self._last_xr_update_at is not None and now - self._last_xr_update_at <= self.XR_TRACKING_TIMEOUT_S
+
+    def _capture_control_heading(self):
+        """Align tracking axes once at grip engagement, keeping gravity vertical."""
+        pose = self._read_valid_xr_pose("headset")
+        if pose is None:
+            return False
+        rotation = tf.quaternion_matrix(np.roll(pose[3:], 1))[:3, :3]
+        # Native XR forward is -Z, with +Y up. Ignore head pitch and roll.
+        forward = -rotation[:, 2]
+        forward[1] = 0.0
+        length = np.linalg.norm(forward)
+        if length < 1e-6:
+            return False
+        forward /= length
+        up = np.array([0.0, 1.0, 0.0])
+        heading = np.column_stack((np.cross(forward, up), up, -forward))
+        self.R_headset_world = R_HEADSET_TO_WORLD @ heading.T
+        return True
 
     def _read_valid_xr_pose(self, source):
         pose = np.asarray(self.xr_client.get_pose_by_name(source), dtype=float)

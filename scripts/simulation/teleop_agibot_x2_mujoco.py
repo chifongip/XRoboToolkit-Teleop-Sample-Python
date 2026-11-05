@@ -23,7 +23,7 @@ def main(
     control_frequency: float = 50.0,
     return_velocity_limit: float = 1.0,
 ):
-    """Control each hand center in the VR tracking world frame while gripping; release to hold.
+    """Hold a grip to move its hand center; release both grips to reset the control heading.
 
     Args:
         xml_path: MuJoCo scene with fixed body and 14 arm position actuators.
@@ -58,7 +58,8 @@ def main(
         control_frequency=control_frequency,
         return_velocity_limit=return_velocity_limit,
     )
-    print("X2 simulation: VR tracking world-frame controllers -> left/right hand centers (position and orientation)")
+    print("X2 simulation: controller motion -> left/right hand centers (position and orientation)")
+    print("Look forward when engaging a grip: heading locks until both grips are released.")
     print(f"Control frequency target: {control_frequency:g} Hz")
     print("Hold the corresponding grip to move; release to hold. Close the viewer or press Ctrl-C to exit.")
     print("Hold Y to return both arms to the default pose; release to hold. Collision checks remain active.")

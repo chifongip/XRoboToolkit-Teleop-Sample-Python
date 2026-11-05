@@ -58,7 +58,8 @@ python scripts/simulation/teleop_agibot_x2_mujoco.py
 
 The bundled X2 v1.3.0 model keeps the pelvis, legs, waist, and head fixed. Hold
 the left or right **grip** to control the corresponding hand center's position and
-orientation using controller motion in the fixed VR tracking world frame.
+orientation using controller motion in a fixed frame aligned to your forward
+heading when the first grip engages.
 Moving your head alone leaves the hand targets unchanged. Turning your body
 while gripping moves the targets if it changes the controllers' world poses.
 Release to hold its last joint command; press again to start from
@@ -165,17 +166,30 @@ The SDK exposes a shared stream timestamp, so
 this watchdog detects stream outages, not individual devices dropping out while
 other packets continue arriving. Invalid active controller poses also hold
 both arms' commands and reset both clutch references, so recovery discards
-controller motion made during the hold. Headset pose data is not used for arm control.
+controller motion made during the hold.
+
+When the first grip engages, the headset's forward direction projected onto the
+horizontal plane sets the control heading. Look forward at engagement. This
+heading stays fixed while either grip is held: later head translation, pitch,
+roll, or yaw cannot shift targets. Both arms share the same heading even if their
+grips engage at different times. Release **both grips** before repositioning;
+the next engagement captures a new heading and rebases each arm at its measured
+hand pose, without a target jump. Returning with Y also ends the current session.
+The headset is needed only to capture the heading; invalid poses or a vertical
+forward direction hold commands until a valid heading can be captured.
+Enable headset streaming in the XR app before engaging a grip. The SDK's shared
+timestamp cannot distinguish a cached headset pose from a live, stationary one;
+re-engaging with headset streaming disabled can capture an old heading.
+Tracking outages rebase controller deltas but preserve the locked session heading.
 
 The XR adapter expects native PICO tracking-world coordinates: +X right, +Y up,
 +Z backward, with poses `[x, y, z, qx, qy, qz, qw]` and positions in meters.
-Robot coordinates are +X forward, +Y left, +Z up. The fixed conversion is
-`[robot_x, robot_y, robot_z] = [-vr_z, -vr_x, vr_y]`; rotations use the same
-basis change. Thus moving a controller forward, right, or up moves its hand
-forward, right, or up relative to the initial tracking-world alignment.
-Both controllers use this same convention, and turning the headset does not
-rotate the mapping. Clutching preserves the hand's initial orientation and
-applies controller rotation changes, rather than imposing its absolute pose.
+The session heading is removed before the fixed basis conversion
+`[robot_x, robot_y, robot_z] = [-vr_z, -vr_x, vr_y]`. Rotations use the same
+basis change. Robot coordinates are +X forward, +Y left, +Z up.
+Clutching preserves the hand's initial orientation and applies controller
+rotation changes, rather than imposing its absolute pose. Headset position is
+not needed because controller translation is already measured from engagement.
 
 The upstream PC Service README inconsistently labels headset and controller
 handedness. The [Unity sender](https://github.com/XR-Robotics/XRoboToolkit-Unity-Client/blob/main/Assets/Scripts/TrackingData.cs)

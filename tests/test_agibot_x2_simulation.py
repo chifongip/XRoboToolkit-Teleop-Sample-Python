@@ -373,7 +373,64 @@ class X2SimulationTests(unittest.TestCase):
         self.assertTrue(np.all(c.mj_data.qpos >= c.mj_model.jnt_range[:, 0] - 1e-3))
         self.assertTrue(np.all(c.mj_data.qpos <= c.mj_model.jnt_range[:, 1] + 1e-3))
 
-    def test_world_frame_targets_ignore_head_motion(self):
+    def test_session_heading_recaptures_after_both_grips_release(self):
+        c = self.make_controller()
+        xr = c.xr_client
+        base = c.R_headset_world.copy()
+        for angle in (0.7, -1.1):
+            # Reposition while stopped, including a body turn in a T pose.
+            xr.grips.update(left_grip=0.0, right_grip=0.0)
+            c.step_control()
+            head = np.eye(4)
+            # Use a yaw followed by local pitch/roll; heading must ignore tilt.
+            yaw = tf.rotation_matrix(angle, [0, 1, 0])[:3, :3]
+            head[:3, :3] = (
+                yaw @ tf.rotation_matrix(0.2, [1, 0, 0])[:3, :3] @ tf.rotation_matrix(-0.15, [0, 0, 1])[:3, :3]
+            )
+            xr.poses["headset"] = np.r_[[1, 1.6, -0.4], np.roll(tf.quaternion_from_matrix(head), -1)]
+            for side, offset in (("left", -0.6), ("right", 0.6)):
+                xr.poses[f"{side}_controller"][:3] = [1, 1.3, -0.4] + yaw @ np.array([offset, 0, 0])
+            measured = c._get_link_pose("left_hand_center")[0]
+            xr.grips["left_grip"] = 1.0
+            c.step_control()
+            np.testing.assert_allclose(c.R_headset_world, base @ yaw.T, atol=1e-8)
+            np.testing.assert_allclose(c.effector_task["left_arm"].T_world_frame[:3, 3], measured, atol=1e-8)
+            # The second arm uses the first arm's heading despite a head turn.
+            xr.poses["headset"][3:] = [0, 0, 0, 1]
+            xr.grips["right_grip"] = 1.0
+            c.step_control()
+            np.testing.assert_allclose(c.R_headset_world, base @ yaw.T, atol=1e-8)
+            targets = {name: task.T_world_frame.copy() for name, task in c.effector_task.items()}
+            delta = tf.rotation_matrix(0.05, [0, 1, 0])[:3, :3]
+            quat = tf.quaternion_about_axis(0.05, [0, 1, 0])
+            for side in ("left", "right"):
+                xr.poses[f"{side}_controller"][:3] += yaw @ np.array([0, 0, -0.02])
+                xr.poses[f"{side}_controller"][3:] = np.roll(quat, -1)
+            c.step_control()
+            for name, target in targets.items():
+                expected = target.copy()
+                expected[:3, 3] += [0.02, 0, 0]
+                expected[:3, :3] = base @ delta @ base.T @ target[:3, :3]
+                np.testing.assert_allclose(c.effector_task[name].T_world_frame, expected, atol=1e-8)
+            # Reset controller orientations for the next session.
+            for side in ("left", "right"):
+                xr.poses[f"{side}_controller"][3:] = [0, 0, 0, 1]
+
+    def test_invalid_initial_heading_holds_then_captures(self):
+        c = self.make_controller()
+        xr = c.xr_client
+        xr.grips.update(left_grip=1.0, right_grip=1.0)
+        held = c.mj_data.ctrl.copy()
+        for quaternion in ([0, 0, 0, 0], np.roll(tf.quaternion_about_axis(np.pi / 2, [1, 0, 0]), -1)):
+            xr.poses["headset"][3:] = quaternion
+            c.step_control()
+            self.assertFalse(c._heading_captured)
+            np.testing.assert_array_equal(c.mj_data.ctrl, held)
+        xr.poses["headset"][3:] = [0, 0, 0, 1]
+        c.step_control()
+        self.assertTrue(c._heading_captured)
+
+    def test_locked_heading_targets_ignore_head_motion(self):
         c = self.make_controller()
         xr = c.xr_client
         for side, offset in (("left", -0.2), ("right", 0.2)):
@@ -390,7 +447,7 @@ class X2SimulationTests(unittest.TestCase):
             for name, target in targets.items():
                 np.testing.assert_allclose(c.effector_task[name].T_world_frame, target, atol=1e-8)
 
-        # Controller motion uses fixed tracking axes regardless of headset pose.
+        # Controller motion uses the locked axes regardless of headset pose.
         rotation = tf.rotation_matrix(0.1, [0, 1, 0])[:3, :3]
         delta_quat = tf.quaternion_about_axis(0.1, [0, 1, 0])
         for side in ("left", "right"):
@@ -433,12 +490,12 @@ class X2SimulationTests(unittest.TestCase):
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
         self.assertIsNone(c.ref_controller_xyz["left_arm"])
 
-    def test_world_frame_control_does_not_require_headset_pose(self):
+    def test_active_session_does_not_require_headset_pose(self):
         c = self.make_controller()
         xr = c.xr_client
-        del xr.poses["headset"]
         xr.grips.update(left_grip=1.0, right_grip=1.0)
         c.step_control()
+        del xr.poses["headset"]
         targets = {name: task.T_world_frame.copy() for name, task in c.effector_task.items()}
         initial_command = c.mj_data.ctrl.copy()
         for i in range(1, 41):
