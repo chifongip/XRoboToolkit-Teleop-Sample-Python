@@ -7,6 +7,61 @@ Pico teleoperation demo written in python for both mujoco simulation and robot h
 This project provides a framework for controlling robots in robot hardware and MuJoCo simulation through XR (VR/AR) input devices. It allows users to manipulate robot arms using natural hand movements captured through XR controllers.
 
 ## Installation
+
+### X2-only installation
+
+For the fixed-base X2 simulation, activate a Python 3.10+ environment and install
+the `x2` extra from this repository's root:
+
+```bash
+python -m pip install -e ".[x2]"
+```
+
+A fresh environment is recommended for dependency isolation, but an existing
+compatible environment also works. With Conda installed, create a dedicated
+Python 3.11 environment and run these commands from this repository's root:
+
+```bash
+conda create -n robojudo-xr python=3.11 pip -y
+conda activate robojudo-xr
+python -m pip install -e ".[x2]"
+```
+
+If reusing an existing Python 3.10+ environment, activate it and run only the pip
+command. RoboJuDo-Plus's installer requires Python 3.11+, so use Python 3.11 for
+an environment shared with that integration. In later terminals, activate
+`robojudo-xr` again before running the sample. These commands install only the
+X2 Python dependencies; PC Service remains a separate installation. The X2-only
+pip installation does not create or switch Conda environments.
+
+This installs the shared dependencies (NumPy, Meshcat, Placo, and the XRoboToolkit
+SDK) plus MuJoCo and Tyro, including their transitive dependencies. It supports
+both the arm-only and `--with-omnihand` simulated X2 examples. It does not install
+other robot SDKs, Torch, camera packages, or dexterous-hand retargeting packages.
+The SDK is installed through pip; no SDK source checkout or setup script is needed.
+
+Verify the installation without a headset or graphical desktop:
+
+```bash
+python -c "from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController; print('OK')"
+python -m pip check
+```
+
+Install and start [XRoboToolkit PC Service](https://github.com/XR-Robotics/XRoboToolkit-PC-Service)
+separately, connect the headset/controllers, and use a graphical desktop to run:
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py
+```
+
+A plain `pip install -e .` now installs only shared dependencies. Use
+`python -m pip install -e ".[all]"` for the previous complete Python dependency
+set, or `".[all,dev]"` to include development tools. Other hardware examples may
+still require external SDKs and system setup. The legacy setup scripts request
+the `all` extra and are not needed for X2-only installation.
+
+### Full installation and hardware setup
+
 1. Download and install [XRoboToolkit PC Service](https://github.com/XR-Robotics/XRoboToolkit-PC-Service). Run the installed program before running the following demo.
 
 2.  **Clone the repository:**

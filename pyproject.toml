@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,10 +13,22 @@ authors = [
     {name = "Zhigen", email = "zhaozhigen@gmail.com"}
 ]
 dependencies = [
-    "mujoco",
     "numpy",
     "meshcat",
-    "placo",
+    "placo>=0.11.0",
+    "xrobotoolkit-sdk>=1.1.0",
+]
+
+[project.optional-dependencies]
+# Fixed-base X2 arms and optional simulated Omnihand Pro fingers.
+x2 = [
+    "mujoco",
+    "tyro",
+]
+# The original complete dependency set for all robot examples.
+all = [
+    "mujoco",
+    "tyro",
     "ur_rtde",
     "dynamixel-sdk",
     "rospkg",
@@ -24,18 +36,15 @@ dependencies = [
     "dex_retargeting",
     "pyrealsense2",
     "opencv-python",
-    "tyro",
     "python-can",
     "piper_sdk",
 ]
-
-[project.optional-dependencies]
 dev = [
     "black",
 ]
 
-[tool.setuptools]
-packages = ["xrobotoolkit_teleop"]
+[tool.setuptools.packages.find]
+include = ["xrobotoolkit_teleop*"]
 
 [tool.setuptools.package-data]
 xrobotoolkit_teleop = ["../assets/**/*"]

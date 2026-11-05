@@ -102,11 +102,7 @@ elif [[ "$1" == "--install" ]]; then
     mkdir dependencies
     cd dependencies
 
-    git clone https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind.git
-    cd XRoboToolkit-PC-Service-Pybind
-    bash setup_ubuntu.sh
-
-    cd ..
+    # The Python package installs xrobotoolkit-sdk through pip below.
     git clone https://github.com/zhigenzhao/R5.git
     cd R5
     git checkout dev/python_pkg
@@ -115,7 +111,7 @@ elif [[ "$1" == "--install" ]]; then
 
     cd ../../../..
 
-    uv pip install -e . || { echo "Failed to install xrobotoolkit_teleop with pip"; exit 1; }
+    uv pip install -e '.[all]' || { echo "Failed to install xrobotoolkit_teleop with pip"; exit 1; }
 
     echo -e "\n"
     echo -e "[INFO] xrobotoolkit_teleop is installed in conda environment '$ENV_NAME'.\n"

@@ -33,11 +33,7 @@ echo "Operating system check passed: $OS_NAME $OS_VERSION"
     mkdir dependencies
     cd dependencies
 
-    git clone https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind.git
-    cd XRoboToolkit-PC-Service-Pybind
-    bash setup_ubuntu.sh
-
-    cd ..
+    # The Python package installs xrobotoolkit-sdk through pip below.
     git clone https://github.com/zhigenzhao/R5.git
     cd R5
     git checkout dev/python_pkg
@@ -46,7 +42,7 @@ echo "Operating system check passed: $OS_NAME $OS_VERSION"
 
     cd ../../../..
 
-    pip install -e . || { echo "Failed to install xrobotoolkit_teleop with pip"; exit 1; }
+    pip install -e '.[all]' || { echo "Failed to install xrobotoolkit_teleop with pip"; exit 1; }
 
 
     echo -e "\n"

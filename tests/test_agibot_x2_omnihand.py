@@ -194,20 +194,21 @@ class X2OmnihandProTests(unittest.TestCase):
         self.assertEqual(inertia.get("mass"), "4")
 
     def test_cli_accepts_equivalent_default_scene_path(self):
+        default_assets = Path(entrypoint.ASSET_PATH).resolve() / "agibot/x2"
         with (
             patch.object(entrypoint, "AgibotX2TeleopController") as factory,
             contextlib.redirect_stdout(io.StringIO()),
         ):
             entrypoint.main(
-                xml_path=str(ASSETS / "scene.xml"),
+                xml_path=str(default_assets / "scene.xml"),
                 with_omnihand=True,
                 arm_velocity_limit=0.4,
                 hand_velocity_limit=0.8,
                 control_frequency=60.0,
                 return_velocity_limit=0.2,
             )
-            self.assertEqual(Path(factory.call_args.args[0]).resolve(), ASSETS / "scene_omnihand.xml")
-            self.assertEqual(Path(factory.call_args.args[1]).resolve(), ASSETS / "x2_omnihand_ik.urdf")
+            self.assertEqual(Path(factory.call_args.args[0]).resolve(), default_assets / "scene_omnihand.xml")
+            self.assertEqual(Path(factory.call_args.args[1]).resolve(), default_assets / "x2_omnihand_ik.urdf")
             self.assertEqual(factory.call_args.kwargs["arm_velocity_limit"], 0.4)
             self.assertEqual(factory.call_args.kwargs["hand_velocity_limit"], 0.8)
             self.assertEqual(factory.call_args.kwargs["control_frequency"], 60.0)
