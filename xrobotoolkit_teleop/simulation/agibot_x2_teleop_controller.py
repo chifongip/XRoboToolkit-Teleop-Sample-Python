@@ -241,13 +241,15 @@ class AgibotX2TeleopController(MujocoTeleopController):
         self.collision_checker = CollisionChecker(self.placo_robot)
         self.collision_pair_count = self.collision_checker.pair_count
         self._check_collision_clearance()
-        self.collision_constraint = self.solver.add_avoid_self_collisions_constraint()
+        self.collision_constraint = self.solver.add_joint_space_half_spaces_constraint(
+            np.zeros((0, self.placo_robot.model.nq)), np.zeros(0)
+        )
         self.collision_constraint.configure("x2_self_collision", "hard")
         # Reserve up to 2 mm for nonlinear distance changes after the QP's
         # linearized step. The command check still enforces the requested margin.
         reserve = min(0.002, (self.collision_trigger - self.collision_margin) / 2)
-        self.collision_constraint.self_collisions_margin = self.collision_margin + reserve
-        self.collision_constraint.self_collisions_trigger = self.collision_trigger
+        self._solver_collision_margin = self.collision_margin + reserve
+        self._update_collision_constraint(self.collision_constraint)
         self.posture_task = self.solver.add_joints_task()
         self.posture_task.set_joints({name: self.placo_robot.get_joint(name) for name in arm_names})
         self.posture_task.configure("arm_posture", "soft", 1e-4)
@@ -349,6 +351,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         try:
             distances = self.collision_checker.distances()
             recovering = np.any(distances < self.collision_margin - 1e-6)
+            self._update_collision_constraint(self.collision_constraint)
             if recovering:
                 # Restoring the full margin in one timestep may be infeasible
                 # under joint speed limits. Favor separation, then independently
@@ -452,9 +455,8 @@ class AgibotX2TeleopController(MujocoTeleopController):
             limits.extend((upper, -lower))
         constraint = solver.add_joint_space_half_spaces_constraint(np.array(rows), np.array(limits))
         constraint.configure("return_step_limits", "hard")
-        avoidance = solver.add_avoid_self_collisions_constraint()
-        avoidance.self_collisions_margin = self.collision_constraint.self_collisions_margin
-        avoidance.self_collisions_trigger = self.collision_trigger
+        avoidance = solver.add_joint_space_half_spaces_constraint(np.zeros((0, len(previous))), np.zeros(0))
+        self._update_collision_constraint(avoidance)
         distances = self.collision_checker.distances()
         recovering = np.any(distances < self.collision_margin - 1e-6)
         avoidance.configure("return_collision", "soft" if recovering else "hard", 1e6)
@@ -476,6 +478,26 @@ class AgibotX2TeleopController(MujocoTeleopController):
             except RuntimeError:
                 continue
         raise RuntimeError("no collision-free return step found")
+
+    def _update_collision_constraint(self, constraint):
+        """Build the native clearance inequalities from cached exact witnesses.
+
+        X2 has a masked floating base and scalar hinge joints, so velocity
+        columns 6: map directly to configuration columns 7:. Nonlinear command
+        validation and the finite-difference penetration recovery stay separate.
+        """
+        distances, jacobian = self.collision_checker.linearized_clearance(self.collision_trigger)
+        configuration = self.placo_robot.state.q
+        if distances.size == 0:
+            # Placo rejects empty half-space matrices. A single tautology keeps
+            # the persistent constraint valid until a nearby pair appears.
+            constraint.A = np.zeros((1, len(configuration)))
+            constraint.b = np.ones(1)
+            return
+        matrix = np.zeros((len(distances), len(configuration)))
+        matrix[:, 7:] = -jacobian[:, 6:]
+        constraint.A = matrix
+        constraint.b = distances - self._solver_collision_margin + matrix @ configuration
 
     def _add_recovery_constraint(self, distances, solver=None):
         """Keep each nearby pair from worsening while soft avoidance separates it.

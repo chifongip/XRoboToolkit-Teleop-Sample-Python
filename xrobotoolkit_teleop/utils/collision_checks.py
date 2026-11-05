@@ -30,21 +30,22 @@ class CollisionChecker:
         spheres = self.shape_types == 2
         self.bounding_radii[spheres] = self.shape_sizes[spheres, 0]
         self._distance_cache = {}
-        self._reference_distances = None
-        self._reference_transforms = None
+        self.clear_cache()
 
     def clear_cache(self):
         self._distance_cache.clear()
         self._reference_distances = None
         self._reference_transforms = None
+        self._witness_key = None
+        self._witnesses = None
 
-    def distances(self):
+    def distances(self, *, require_witnesses=False):
         if not np.all(np.isfinite(self.robot.state.q)):
             raise RuntimeError("non-finite collision configuration")
         self.robot.update_kinematics()
         key = self.robot.state.q.tobytes()
         cached = self._distance_cache.get(key)
-        if cached is not None:
+        if cached is not None and (not require_witnesses or key == self._witness_key):
             return cached
         distances = self.robot.distances()
         if not distances or len(distances) != self.pair_count:
@@ -56,10 +57,53 @@ class CollisionChecker:
             self._distance_cache.clear()
         values.flags.writeable = False
         self._distance_cache[key] = values
+        # Retain only the latest witness query, rather than all geometry records
+        # for every sampled configuration in the distance cache.
+        self._witness_key = key
+        self._witnesses = distances
         if self.can_bound:
             self._reference_distances = values
             self._reference_transforms = np.asarray(self.robot.collision_placements(self.robot.state.q))
         return values
+
+    def linearized_clearance(self, trigger):
+        """Return nearby signed distances and their joint-velocity Jacobian.
+
+        Reuse the exact witnesses from the baseline distance query. This is the
+        same witness-point linearization as Placo's self-collision constraint,
+        including its reversed normal for penetrating shapes.
+        """
+        values = self.distances(require_witnesses=True)
+        nearby = np.flatnonzero(values < trigger)
+        robot = self.robot
+        jacobian = np.zeros((len(nearby), robot.model.nv))
+        if nearby.size == 0:
+            return values[nearby], jacobian
+        witnesses = [self._witnesses[int(index)] for index in nearby]
+        a = np.array([distance.pointA for distance in witnesses])
+        b = np.array([distance.pointB for distance in witnesses])
+        parents = np.array([(distance.parentA, distance.parentB) for distance in witnesses])
+        normal = b - a
+        lengths = np.linalg.norm(normal, axis=1)
+        if not np.all(np.isfinite(lengths)) or np.any(lengths < 1e-12):
+            raise RuntimeError("undefined collision witness normal")
+        normal /= lengths[:, None]
+        normal[values[nearby] < 0] *= -1
+        joint_jacobians = np.zeros((robot.model.njoints, 6, robot.model.nv))
+        for parent in np.unique(parents):
+            if parent != 0:
+                joint_jacobians[parent] = robot.joint_jacobian(robot.model.names[int(parent)], "world")
+        for sign, parent, point in ((-1, parents[:, 0], a), (1, parents[:, 1], b)):
+            joint = joint_jacobians[parent]
+            # WORLD twists are about the world origin. Shift their linear
+            # velocity to the witness point before projecting on the normal.
+            jacobian += sign * (
+                np.einsum("pi,pij->pj", normal, joint[:, :3])
+                + np.einsum("pi,pij->pj", np.cross(point, normal), joint[:, 3:])
+            )
+        if not np.all(np.isfinite(jacobian)):
+            raise RuntimeError("non-finite collision Jacobian")
+        return values[nearby], jacobian
 
     def _support_radii(self, indices, local_axes):
         """Projection radii for boxes, Z-axis cylinders, and spheres."""

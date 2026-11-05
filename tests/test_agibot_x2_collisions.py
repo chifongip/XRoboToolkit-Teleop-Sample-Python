@@ -91,6 +91,87 @@ class X2CollisionTests(unittest.TestCase):
                 self.assertIn("cylinder", kinds)
                 self.assertTrue(kinds <= {"box", "cylinder", "sphere"})
 
+    def test_cached_collision_linearization_matches_native_solver(self):
+        # Compare the entire QP, including inactive joints and soft avoidance
+        # during penetration recovery, against Placo's original constraint.
+        for omnihand in (False, True):
+            c = self.make_controller(omnihand)
+            native = self.make_controller(omnihand)
+            native.solver.remove_constraint(native.collision_constraint)
+            native.collision_constraint = native.solver.add_avoid_self_collisions_constraint()
+            native.collision_constraint.self_collisions_margin = native._solver_collision_margin
+            native.collision_constraint.self_collisions_trigger = native.collision_trigger
+            with patch.object(native, "_update_collision_constraint"):
+                for pitch, roll in ((None, None), (1.7, 0.0), (2.0, -0.06)):
+                    for left_only in (False, True):
+                        with self.subTest(omnihand=omnihand, pitch=pitch, left_only=left_only):
+                            for controller in (c, native):
+                                mujoco.mj_resetDataKeyframe(
+                                    controller.mj_model, controller.mj_data, controller.mj_model.key("home").id
+                                )
+                                if pitch is not None:
+                                    for joint, value in (
+                                        ("left_shoulder_pitch_joint", pitch),
+                                        ("left_shoulder_roll_joint", roll),
+                                    ):
+                                        controller.mj_data.qpos[controller.mj_model.joint(joint).qposadr] = value
+                                for actuator, joint in controller.arm_actuators.items():
+                                    controller.mj_data.ctrl[actuator] = controller.mj_data.qpos[
+                                        controller.mj_model.joint(joint).qposadr
+                                    ][0]
+                                mujoco.mj_forward(controller.mj_model, controller.mj_data)
+                                controller.xr_client.grips.update(left_grip=1.0, right_grip=0.0 if left_only else 1.0)
+                                for name in controller.manipulator_config:
+                                    controller._reset_clutch_reference(name)
+                                    source = controller.manipulator_config[name]["pose_source"]
+                                    controller.xr_client.poses[source][:3] = 0
+                                controller._update_ik()
+                            self.assertTrue(c._ik_valid)
+                            self.assertTrue(native._ik_valid)
+                            np.testing.assert_allclose(
+                                c.placo_robot.state.q, native.placo_robot.state.q, atol=1e-7, rtol=0
+                            )
+                            for movement in (0.002, 0.005, -0.002):
+                                for controller in (c, native):
+                                    controller.xr_client.poses["left_controller"][0] = movement
+                                    controller._update_ik()
+                                self.assertEqual(c._ik_valid, native._ik_valid)
+                                np.testing.assert_allclose(
+                                    c.placo_robot.state.q, native.placo_robot.state.q, atol=1e-7, rtol=0
+                                )
+
+    def test_collision_linearization_reuses_current_witnesses_only(self):
+        c = self.make_controller(True)
+        checker, robot = c.collision_checker, c.placo_robot
+        checker.clear_cache()
+        q = robot.state.q.copy()
+        native_distances = robot.distances
+        with patch.object(placo.RobotWrapper, "distances", side_effect=native_distances) as query:
+            checker.distances()
+            distances, jacobian = checker.linearized_clearance(c.collision_trigger)
+            self.assertEqual(query.call_count, 1)
+            robot.set_joint("left_shoulder_pitch_joint", robot.get_joint("left_shoulder_pitch_joint") + 0.001)
+            checker.linearized_clearance(c.collision_trigger)
+            self.assertEqual(query.call_count, 2)
+            robot.state.q = q
+            checker.distances()  # Scalar cache hit; witnesses still belong to the other pose.
+            self.assertEqual(query.call_count, 2)
+            restored_distances, restored_jacobian = checker.linearized_clearance(c.collision_trigger)
+            self.assertEqual(query.call_count, 3)
+            np.testing.assert_array_equal(restored_distances, distances)
+            np.testing.assert_allclose(restored_jacobian, jacobian, atol=1e-12)
+            empty_distances, empty_jacobian = checker.linearized_clearance(-1e6)
+            self.assertEqual(empty_distances.shape, (0,))
+            self.assertEqual(empty_jacobian.shape, (0, robot.model.nv))
+
+    def test_ik_with_no_pairs_inside_collision_trigger(self):
+        c = self.make_controller(collision_trigger=0.025)
+        c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
+        c._update_ik()
+        self.assertTrue(c._ik_valid)
+        np.testing.assert_array_equal(np.atleast_2d(c.collision_constraint.A), np.zeros((1, c.placo_robot.model.nq)))
+        np.testing.assert_array_equal(np.atleast_1d(c.collision_constraint.b), np.ones(1))
+
     def test_articulated_pairs_cover_external_contacts_without_structural_neighbors(self):
         pairs = json.loads((ASSETS / "collisions_omnihand.json").read_text())
         normalized = {tuple(sorted(pair)) for pair in pairs}

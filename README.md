@@ -120,6 +120,11 @@ period. Physics steps are at most 1 ms in the bundled scenes; rates such as 60 H
 use slightly smaller steps so each cycle advances exactly one control period.
 Collision checks can overrun the target period.
 
+X2 IK reuses the baseline query's exact collision witnesses to build the same
+linearized clearance constraints for nearby pairs. This avoids a second full
+distance query inside the solver. Joint limits, velocity limits, penetration
+recovery, and nonlinear command-path checks remain enabled.
+
 Set the arm IK joint speed cap with `--arm-velocity-limit 2.0` (rad/s; default 8.0). Each arm joint
 uses the lower of this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
 shoulder pitch/roll, and 15.077 rad/s for shoulder yaw, elbows, and wrist yaw).
