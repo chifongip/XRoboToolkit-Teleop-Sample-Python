@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import mujoco
 import numpy as np
+import placo
 from meshcat import transformations as tf
 from mujoco import viewer as mj_viewer
 from numpy.polynomial.polynomial import polyval
@@ -39,6 +40,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         collision_margin=0.02,
         collision_trigger=0.08,
         control_frequency=50.0,
+        return_velocity_limit=1.0,
     ):
         if not np.isfinite(control_frequency) or control_frequency <= 0:
             raise ValueError("control_frequency must be finite and positive")
@@ -46,10 +48,15 @@ class AgibotX2TeleopController(MujocoTeleopController):
         if not np.isfinite(control_dt) or control_dt <= 0:
             raise ValueError("control_frequency must produce a finite positive control period")
         self.control_frequency = control_frequency
-        for name, value in (("arm_velocity_limit", arm_velocity_limit), ("hand_velocity_limit", hand_velocity_limit)):
+        for name, value in (
+            ("arm_velocity_limit", arm_velocity_limit),
+            ("hand_velocity_limit", hand_velocity_limit),
+            ("return_velocity_limit", return_velocity_limit),
+        ):
             if not np.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
         self.arm_velocity_limit = arm_velocity_limit
+        self.return_velocity_limit = return_velocity_limit
         self.hand_velocity_limit = hand_velocity_limit
         if not np.isfinite(collision_margin) or collision_margin <= 0:
             raise ValueError("collision_margin must be finite and positive")
@@ -283,6 +290,9 @@ class AgibotX2TeleopController(MujocoTeleopController):
         self._ik_valid = False
         stream_fresh = self._xr_stream_is_fresh()
         self._stream_fresh = stream_fresh
+        if self.xr_client.get_button_state_by_name("Y"):
+            self._update_return_to_default(stream_fresh)
+            return
         tracking_valid = stream_fresh
         for name, config in self.manipulator_config.items():
             grip = self.xr_client.get_key_value_by_name(config["control_trigger"])
@@ -360,7 +370,107 @@ class AgibotX2TeleopController(MujocoTeleopController):
             if recovery_constraint is not None:
                 self.solver.remove_constraint(recovery_constraint)
 
-    def _add_recovery_constraint(self, distances):
+    def _update_return_to_default(self, stream_fresh):
+        """Hold Y to approach the home keyframe through checked joint steps."""
+        for name in self.manipulator_config:
+            self.active[name] = True
+            self.ref_ee_xyz[name] = None
+            self.ref_ee_quat[name] = None
+            self.ref_controller_xyz[name] = None
+            self.ref_controller_quat[name] = None
+        if not stream_fresh or any(
+            self._read_valid_xr_pose(config["pose_source"]) is None for config in self.manipulator_config.values()
+        ):
+            return
+        previous = self.placo_robot.state.q.copy()
+        home = self.mj_model.key("home").qpos
+        try:
+            bounds = {}
+            for actuator, joint in self.arm_actuators.items():
+                velocity_offset = self.placo_robot.get_joint_v_offset(joint)
+                # Bound changes from the previous servo target. The measured
+                # position includes gravity-induced tracking error, which is not
+                # a one-cycle joint movement. Collision checks still cover the
+                # full measured-to-target and old-to-new target segments.
+                command_delta = self.dt * min(
+                    self.return_velocity_limit, self.placo_robot.model.velocity_limit[velocity_offset]
+                )
+                commanded = self.mj_data.ctrl[actuator]
+                lower = commanded - command_delta
+                upper = commanded + command_delta
+                bounds[joint] = (lower, upper)
+                target = home[self.mj_model.joint(joint).qposadr[0]]
+                self.placo_robot.set_joint(joint, np.clip(target, lower, upper))
+            try:
+                self._validate_collision_motion(previous)
+            except RuntimeError:
+                self.placo_robot.state.q = previous.copy()
+                self._solve_return_avoidance(previous, home, bounds)
+            self._ik_valid = True
+        except RuntimeError as exc:
+            self.placo_robot.state.q = previous
+            print(f"X2 return to default paused; holding previous commands: {exc}")
+        finally:
+            self.placo_robot.update_kinematics()
+            for name, config in self.manipulator_config.items():
+                self.effector_task[name].T_world_frame = self.placo_robot.get_T_world_frame(config["link_name"])
+
+    def _solve_return_avoidance(self, previous, home, bounds):
+        """Use a collision-constrained posture solve when the direct step is blocked.
+
+        The solver can move joints away from home temporarily to gain clearance.
+        Every proposal still passes the nonlinear command-path checks.
+        """
+        robot = self.placo_robot
+        solver = placo.KinematicsSolver(robot)
+        solver.dt = self.dt
+        solver.mask_fbase(True)
+        for joint in self.hand_joint_names:
+            solver.mask_dof(joint)
+        solver.enable_joint_limits(True)
+        # Explicit target bounds below enforce speed limits. A velocity bound
+        # centered on measured positions would reintroduce the servo-error stall.
+        solver.enable_velocity_limits(False)
+        posture = solver.add_joints_task()
+        posture.set_joints(
+            {joint: home[self.mj_model.joint(joint).qposadr[0]] for joint in self.arm_actuators.values()}
+        )
+        posture.configure("return_home", "soft", 1.0)
+        # Bound the outgoing servo target step independently of tracking error.
+        rows, limits = [], []
+        for joint, (lower, upper) in bounds.items():
+            row = np.zeros(len(previous))
+            row[robot.get_joint_offset(joint)] = 1.0
+            rows.extend((row, -row))
+            limits.extend((upper, -lower))
+        constraint = solver.add_joint_space_half_spaces_constraint(np.array(rows), np.array(limits))
+        constraint.configure("return_step_limits", "hard")
+        avoidance = solver.add_avoid_self_collisions_constraint()
+        avoidance.self_collisions_margin = self.collision_constraint.self_collisions_margin
+        avoidance.self_collisions_trigger = self.collision_trigger
+        distances = self.collision_checker.distances()
+        recovering = np.any(distances < self.collision_margin - 1e-6)
+        avoidance.configure("return_collision", "soft" if recovering else "hard", 1e6)
+        if recovering:
+            self._add_recovery_constraint(distances, solver=solver)
+        solver.solve(True)
+        solution = robot.state.q.copy()
+        if not np.all(np.isfinite(solution)):
+            raise RuntimeError("non-finite return solution")
+        for scale in (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125):
+            robot.state.q = previous + scale * (solution - previous)
+            if any(
+                not lower - 1e-9 <= robot.get_joint(joint) <= upper + 1e-9 for joint, (lower, upper) in bounds.items()
+            ):
+                continue
+            try:
+                self._validate_collision_motion(previous)
+                return
+            except RuntimeError:
+                continue
+        raise RuntimeError("no collision-free return step found")
+
+    def _add_recovery_constraint(self, distances, solver=None):
         """Keep each nearby pair from worsening while soft avoidance separates it.
 
         Finite differences include signed primitive penetration, where separation of
@@ -391,7 +501,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         # d(q + dq) >= min(d(q), margin), expressed as A q_new <= b.
         current = distances[nearby]
         floor = np.minimum(current, self.collision_margin)
-        constraint = self.solver.add_joint_space_half_spaces_constraint(
+        constraint = (self.solver if solver is None else solver).add_joint_space_half_spaces_constraint(
             -jacobian, current - floor - jacobian @ previous
         )
         constraint.configure("x2_recovery_clearance", "hard")

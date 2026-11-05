@@ -226,6 +226,6 @@
     <position name="right_wrist_roll_joint" joint="right_wrist_roll_joint" kp="60" kv="6" ctrlrange="-0.724 1.5097" forcerange="-4.8 4.8" />
   </actuator>
   <keyframe>
-    <key name="home" qpos="-0.3 0.2 0.0 -1.0 0.0 0.0 0.0 -0.3 -0.2 0.0 -1.0 0.0 0.0 0.0" ctrl="-0.3 0.2 0.0 -1.0 0.0 0.0 0.0 -0.3 -0.2 0.0 -1.0 0.0 0.0 0.0" />
+    <key name="home" qpos="0.35 0.1 0.0 -0.87 0.0 0.0 0.0 0.35 -0.1 0.0 -0.87 0.0 0.0 0.0" ctrl="0.35 0.1 0.0 -0.87 0.0 0.0 0.0 0.35 -0.1 0.0 -0.87 0.0 0.0 0.0" />
   </keyframe>
 </mujoco>

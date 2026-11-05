@@ -130,7 +130,8 @@ class X2CollisionTests(unittest.TestCase):
         target = robot.state.q.copy()
         robot.update_kinematics()
         self.assertGreater(min(d.min_distance for d in robot.distances()), c.collision_margin)
-        robot.state.q = (home + target) / 2
+        # The penetrating portion is 40% along the path from the new home.
+        robot.state.q = home + 0.4 * (target - home)
         robot.update_kinematics()
         self.assertLess(min(d.min_distance for d in robot.distances()), 0)
         robot.state.q = target.copy()
@@ -210,8 +211,10 @@ class X2CollisionTests(unittest.TestCase):
             c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
             c.step_control()
             initial = c.mj_data.ctrl.copy()
-            c.xr_client.poses["left_controller"][0] = 0.5
-            c.xr_client.poses["right_controller"][0] = -0.5
+            # Lift and reach forward while moving inward, clearing the thighs
+            # beneath the locomanipulation home pose.
+            c.xr_client.poses["left_controller"][:3] = [0.5, 0.3, -0.2]
+            c.xr_client.poses["right_controller"][:3] = [-0.5, 0.3, -0.2]
             accepted = 0
             with contextlib.redirect_stdout(io.StringIO()):
                 for _ in range(100):
@@ -237,6 +240,78 @@ class X2CollisionTests(unittest.TestCase):
                     mujoco.mj_step(c.mj_model, c.mj_data, nstep=c.physics_substeps)
             self.assertGreater(accepted, 5)
             self.assertGreater(np.linalg.norm(c.mj_data.ctrl - initial), 0.05)
+
+    def test_return_avoids_obstructed_direct_path_and_reaches_home(self):
+        for omnihand, dynamics in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(omnihand=omnihand, dynamics=dynamics):
+                c = self.make_controller(omnihand, return_velocity_limit=0.5)
+                joints = {
+                    "left_elbow_joint": -1.5901651064,
+                    "left_shoulder_pitch_joint": 1.0478224949,
+                    "left_shoulder_roll_joint": 0.9220900547,
+                    "left_shoulder_yaw_joint": -1.7941147610,
+                    "left_wrist_pitch_joint": 0.2078817563,
+                    "left_wrist_roll_joint": -0.5077870421,
+                    "left_wrist_yaw_joint": 1.5281786778,
+                }
+                for joint, value in joints.items():
+                    c.mj_data.qpos[c.mj_model.joint(joint).qposadr] = value
+                self._sync_return_test_commands(c)
+                c._update_robot_state()
+                initial = c.placo_robot.state.q.copy()
+                # Both endpoints are clear, but their straight interpolation is blocked.
+                self.assertGreater(c.collision_checker.distances().min(), c.collision_margin)
+                for joint, value in joints.items():
+                    home = c.mj_model.key("home").qpos[c.mj_model.joint(joint).qposadr[0]]
+                    c.placo_robot.set_joint(joint, (home + value) / 2)
+                self.assertLess(c.collision_checker.distances().min(), c.collision_margin)
+                c.placo_robot.state.q = initial
+                c.xr_client.buttons["Y"] = True
+                with patch.object(c, "_solve_return_avoidance", wraps=c._solve_return_avoidance) as avoid:
+                    self._run_checked_return(c, dynamics=dynamics)
+                self.assertGreater(avoid.call_count, 0)
+
+    def test_return_recovers_existing_collision_without_worsening_it(self):
+        for omnihand in (False, True):
+            with self.subTest(omnihand=omnihand):
+                c = self.make_controller(omnihand)
+                for joint, value in (("left_shoulder_pitch_joint", 2.0), ("left_shoulder_roll_joint", -0.06)):
+                    c.mj_data.qpos[c.mj_model.joint(joint).qposadr] = value
+                self._sync_return_test_commands(c)
+                c._update_robot_state()
+                self.assertLess(c.collision_checker.distances().min(), 0)
+                c.xr_client.buttons["Y"] = True
+                self._run_checked_return(c)
+
+    @staticmethod
+    def _sync_return_test_commands(c):
+        for actuator, joint in c.arm_actuators.items():
+            c.mj_data.ctrl[actuator] = c.mj_data.qpos[c.mj_model.joint(joint).qposadr][0]
+        mujoco.mj_forward(c.mj_model, c.mj_data)
+
+    def _run_checked_return(self, c, dynamics=False):
+        arms = list(c.arm_actuators)
+        for _ in range(400):
+            c._update_robot_state()
+            measured = c.collision_checker.distances()
+            previous = c.mj_data.ctrl.copy()
+            c._update_ik()
+            self.assertTrue(c._ik_valid)
+            c._send_command()
+            self.assertTrue(c._ik_valid)
+            self.assertLessEqual(np.max(np.abs(c.mj_data.ctrl - previous)), c.return_velocity_limit * c.dt + 1e-8)
+            self.assertTrue(np.all(c.collision_checker.distances() >= np.minimum(measured, c.collision_margin) - 1e-6))
+            if dynamics:
+                mujoco.mj_step(c.mj_model, c.mj_data, nstep=c.physics_substeps)
+            else:
+                # Ideal tracking isolates collision planning from servo dynamics.
+                for actuator, joint in c.arm_actuators.items():
+                    c.mj_data.qpos[c.mj_model.joint(joint).qposadr] = c.mj_data.ctrl[actuator]
+                mujoco.mj_forward(c.mj_model, c.mj_data)
+            if np.max(np.abs(c.mj_data.ctrl[arms] - c.mj_model.key("home").ctrl[arms])) < 1e-5:
+                break
+        else:
+            self.fail("Return did not reach home")
 
     def test_recovery_from_margin_violation_and_penetration_respects_speed_limits(self):
         for omnihand in (False, True):

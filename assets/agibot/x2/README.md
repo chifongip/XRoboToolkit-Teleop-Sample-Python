@@ -22,9 +22,11 @@ Modifications for this demo:
 - `left_hand_center` and `right_hand_center` are fixed frames at the bounding-box
   centers of the rigid hand meshes, with axes parallel to the wrist-roll frames.
   They are present in both `x2_fixed.xml` and `x2_fixed.urdf` and are the IK targets.
-- The home pose uses shoulder pitch -0.3, shoulder roll +0.2/-0.2, elbows -1.0,
-  and other joints zero (radians). Position servos support gravity-loaded arms;
-  small steady-state tracking errors are expected.
+- The arm home pose matches `X2_LOCOMANIPULATION_DEFAULT_POS` from RoboJuDo-Plus
+  (`robojudo/config/x2/policy/x2_locomanipulation_policy_cfg.py`): shoulder pitch
+  0.35, shoulder roll +0.1/-0.1, elbows -0.87, and other arm joints zero (radians).
+  Position servos support gravity-loaded arms; small steady-state tracking errors
+  are expected.
 
 This demo simulates arm dynamics with IK self-collision avoidance. MuJoCo
 self-contact forces remain disabled. The upstream collision shapes overlap at

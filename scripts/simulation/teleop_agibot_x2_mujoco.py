@@ -21,6 +21,7 @@ def main(
     collision_trigger: float = 0.08,
     with_omnihand: bool = False,
     control_frequency: float = 50.0,
+    return_velocity_limit: float = 1.0,
 ):
     """Control each hand center in the VR tracking world frame while gripping; release to hold.
 
@@ -30,6 +31,7 @@ def main(
         scale_factor: Robot translation per unit of VR controller translation.
         visualize_placo: Also open the Placo visualization in a browser.
         arm_velocity_limit: Arm IK joint speed cap in rad/s, bounded by each joint's URDF limit.
+        return_velocity_limit: Return-to-default joint target speed cap in rad/s; also bounded by arm/URDF limits.
         hand_velocity_limit: Actuated finger target speed cap in rad/s, bounded by each joint's URDF limit.
         collision_margin: Minimum clearance between IK collision shapes, in meters.
         collision_trigger: Distance at which IK collision constraints activate, in meters; greater than margin.
@@ -54,10 +56,12 @@ def main(
         collision_margin=collision_margin,
         collision_trigger=collision_trigger,
         control_frequency=control_frequency,
+        return_velocity_limit=return_velocity_limit,
     )
     print("X2 simulation: VR tracking world-frame controllers -> left/right hand centers (position and orientation)")
     print(f"Control frequency target: {control_frequency:g} Hz")
     print("Hold the corresponding grip to move; release to hold. Close the viewer or press Ctrl-C to exit.")
+    print("Hold Y to return both arms to the default pose; release to hold. Collision checks remain active.")
     if with_omnihand:
         print("Left/right triggers close the corresponding Omnihand Pro hand; release to open (contacts disabled).")
     controller.run()

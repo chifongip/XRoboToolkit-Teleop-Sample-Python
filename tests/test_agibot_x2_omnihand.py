@@ -39,6 +39,24 @@ class HandXR(FakeXR):
 
 
 class X2OmnihandProTests(unittest.TestCase):
+    def test_return_to_default_with_omnihand(self):
+        c = self.make_controller(arm_velocity_limit=0.5)
+        for joint in ("left_elbow_joint", "right_elbow_joint"):
+            c.mj_data.qpos[c.mj_model.joint(joint).qposadr[0]] -= 0.1
+            actuator = next(i for i, name in c.arm_actuators.items() if name == joint)
+            c.mj_data.ctrl[actuator] -= 0.1
+        mujoco.mj_forward(c.mj_model, c.mj_data)
+        c.xr_client.buttons["Y"] = True
+        arms = list(c.arm_actuators)
+        for _ in range(60):
+            previous = c.mj_data.ctrl.copy()
+            c.step_control()
+            self.assertTrue(c._ik_valid)
+            self.assertLessEqual(np.max(np.abs(c.mj_data.ctrl[arms] - previous[arms])), 0.5 * c.dt + 1e-12)
+        np.testing.assert_allclose(c.mj_data.ctrl[arms], c.mj_model.key("home").ctrl[arms], atol=1e-6)
+        for actuator in c.hand_command_offsets:
+            self.assertEqual(c.mj_data.ctrl[actuator], 0)
+
     def make_controller(
         self, xml_path=ASSETS / "scene_omnihand.xml", robot_urdf_path=ASSETS / "x2_omnihand_ik.urdf", **kwargs
     ):
@@ -186,16 +204,19 @@ class X2OmnihandProTests(unittest.TestCase):
                 arm_velocity_limit=0.4,
                 hand_velocity_limit=0.8,
                 control_frequency=60.0,
+                return_velocity_limit=0.2,
             )
             self.assertEqual(Path(factory.call_args.args[0]).resolve(), ASSETS / "scene_omnihand.xml")
             self.assertEqual(Path(factory.call_args.args[1]).resolve(), ASSETS / "x2_omnihand_ik.urdf")
             self.assertEqual(factory.call_args.kwargs["arm_velocity_limit"], 0.4)
             self.assertEqual(factory.call_args.kwargs["hand_velocity_limit"], 0.8)
             self.assertEqual(factory.call_args.kwargs["control_frequency"], 60.0)
+            self.assertEqual(factory.call_args.kwargs["return_velocity_limit"], 0.2)
             factory.return_value.run.assert_called_once()
             factory.reset_mock()
             entrypoint.main()
             self.assertEqual(factory.call_args.kwargs["control_frequency"], 50.0)
+            self.assertEqual(factory.call_args.kwargs["return_velocity_limit"], 1.0)
             factory.reset_mock()
             with self.assertRaisesRegex(ValueError, "custom --xml-path"):
                 entrypoint.main(xml_path="custom.xml", with_omnihand=True)

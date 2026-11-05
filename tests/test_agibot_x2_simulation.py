@@ -27,6 +27,10 @@ class FakeXR:
         self.timestamp_ns = 1
         self.advance_timestamps = True
         self.closed = False
+        self.buttons = {"Y": False}
+
+    def get_button_state_by_name(self, name):
+        return self.buttons[name]
 
     def get_key_value_by_name(self, name):
         return self.grips[name]
@@ -66,6 +70,110 @@ class X2SimulationTests(unittest.TestCase):
         self.assertEqual(c.physics_substeps, 20)
         c.step_control()
         self.assertAlmostEqual(c.mj_data.time, c.dt, places=12)
+
+    def test_hold_y_returns_arms_with_speed_limits_and_release_holds(self):
+        c = self.make_controller(return_velocity_limit=0.25)
+        for joint in ("left_elbow_joint", "right_elbow_joint"):
+            c.mj_data.qpos[c.mj_model.joint(joint).qposadr[0]] -= 0.1
+            actuator = next(i for i, name in c.arm_actuators.items() if name == joint)
+            c.mj_data.ctrl[actuator] -= 0.1
+        mujoco.mj_forward(c.mj_model, c.mj_data)
+        initial = c.mj_data.ctrl.copy()
+        home = c.mj_model.key("home").ctrl
+        c.xr_client.buttons["Y"] = True
+        for step in range(80):
+            before = c.mj_data.ctrl.copy()
+            c.step_control()
+            self.assertTrue(c._ik_valid)
+            self.assertLessEqual(np.max(np.abs(c.mj_data.ctrl - before)), 0.25 * c.dt + 1e-12)
+            if step == 2:
+                c.xr_client.buttons["Y"] = False
+                held = c.mj_data.ctrl.copy()
+                c.step_control()
+                np.testing.assert_array_equal(c.mj_data.ctrl, held)
+                self.assertGreater(np.linalg.norm(held - home), 0.05)
+                c.xr_client.buttons["Y"] = True
+        self.assertLess(np.linalg.norm(c.mj_data.ctrl - home), 1e-6)
+        self.assertGreater(np.linalg.norm(c.mj_data.ctrl - initial), 0.1)
+        c.xr_client.buttons["Y"] = False
+        held = c.mj_data.ctrl.copy()
+        c.step_control()
+        np.testing.assert_array_equal(c.mj_data.ctrl, held)
+
+    def test_slow_return_reaches_home_despite_settled_servo_error(self):
+        for force_avoidance in (False, True):
+            with self.subTest(force_avoidance=force_avoidance):
+                c = self.make_controller(arm_velocity_limit=0.1, return_velocity_limit=0.05)
+                joint = c.mj_model.joint("left_elbow_joint")
+                actuator = next(a for a, name in c.arm_actuators.items() if name == joint.name)
+                c.mj_data.qpos[joint.qposadr[0]] -= 0.1
+                c.mj_data.ctrl[actuator] -= 0.1
+                mujoco.mj_forward(c.mj_model, c.mj_data)
+                for _ in range(100):
+                    c.step_control()
+                errors = [
+                    abs(c.mj_data.qpos[c.mj_model.joint(name).qposadr[0]] - c.mj_data.ctrl[a])
+                    for a, name in c.arm_actuators.items()
+                ]
+                self.assertGreater(max(errors), (c.arm_velocity_limit + c.return_velocity_limit) * c.dt)
+                c.xr_client.buttons["Y"] = True
+                validate = c._validate_collision_motion
+                calls = 0
+
+                def check(*args, **kwargs):
+                    nonlocal calls
+                    calls += 1
+                    if force_avoidance and calls == 1:
+                        raise RuntimeError("exercise collision-constrained fallback")
+                    return validate(*args, **kwargs)
+
+                with (
+                    patch.object(c, "_validate_collision_motion", side_effect=check),
+                    patch.object(c, "_solve_return_avoidance", wraps=c._solve_return_avoidance) as avoid,
+                ):
+                    for _ in range(150):
+                        before = c.mj_data.ctrl.copy()
+                        c.step_control()
+                        self.assertTrue(c._ik_valid)
+                        self.assertLessEqual(np.max(np.abs(c.mj_data.ctrl - before)), 0.05 * c.dt + 1e-9)
+                        if np.max(np.abs(c.mj_data.ctrl - c.mj_model.key("home").ctrl)) < 1e-6:
+                            break
+                    else:
+                        self.fail("Slow return stalled with steady servo error")
+                    if force_avoidance:
+                        self.assertGreater(avoid.call_count, 0)
+
+    def test_return_to_default_holds_on_tracking_loss_and_collision(self):
+        c = self.make_controller()
+        c.xr_client.buttons["Y"] = True
+        held = c.mj_data.ctrl.copy()
+        with patch.object(c, "_xr_stream_is_fresh", return_value=False):
+            c.step_control()
+        self.assertFalse(c._ik_valid)
+        np.testing.assert_array_equal(c.mj_data.ctrl, held)
+        c.xr_client.poses["left_controller"][0] = np.nan
+        c.step_control()
+        self.assertFalse(c._ik_valid)
+        np.testing.assert_array_equal(c.mj_data.ctrl, held)
+        c.xr_client.poses["left_controller"][0] = 0.0
+        with patch.object(c, "_validate_collision_motion", side_effect=RuntimeError("blocked")) as check:
+            c.step_control()
+        self.assertGreater(check.call_count, 0)
+        self.assertFalse(c._ik_valid)
+        np.testing.assert_array_equal(c.mj_data.ctrl, held)
+
+    def test_return_release_rebases_gripped_controllers(self):
+        c = self.make_controller()
+        c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
+        c.step_control()
+        c.xr_client.buttons["Y"] = True
+        c.xr_client.poses["left_controller"][0] = 1.0
+        c.step_control()
+        self.assertIsNone(c.ref_controller_xyz["left_arm"])
+        c.xr_client.buttons["Y"] = False
+        c.step_control()
+        xyz, quat = c._get_link_pose("left_hand_center")
+        np.testing.assert_allclose(c.effector_task["left_arm"].T_world_frame[:3, 3], xyz, atol=0.003)
 
     def test_control_frequency_preserves_exact_physics_periods(self):
         for frequency in (25.0, 60.0, 100.0, 2000.0):
@@ -172,8 +280,10 @@ class X2SimulationTests(unittest.TestCase):
                     self.assertAlmostEqual(c.placo_robot.model.velocity_limit[offset], limit)
                 c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
                 c.step_control()
+                # Reach forward/up from the new home so collision rejection
+                # does not obscure the velocity-limit assertions.
                 for side in ("left", "right"):
-                    c.xr_client.poses[f"{side}_controller"][:3] = [0.2, 0.1, 0.1]
+                    c.xr_client.poses[f"{side}_controller"][:3] = [0.02, 0.1, -0.1]
                     c.xr_client.poses[f"{side}_controller"][3:] = np.roll(tf.quaternion_about_axis(0.7, [1, 0, 0]), -1)
                 for _ in range(20):
                     c._update_robot_state()
@@ -185,7 +295,7 @@ class X2SimulationTests(unittest.TestCase):
                         self.assertLessEqual(speed, limit + 1e-6, name)
 
     def test_invalid_velocity_caps_are_rejected_before_connecting_xr(self):
-        for name in ("arm_velocity_limit", "hand_velocity_limit"):
+        for name in ("arm_velocity_limit", "hand_velocity_limit", "return_velocity_limit"):
             for value in (0.0, -1.0, np.nan, np.inf, -np.inf):
                 with (
                     self.subTest(parameter=name, value=value),

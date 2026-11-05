@@ -64,6 +64,16 @@ while gripping moves the targets if it changes the controllers' world poses.
 Release to hold its last joint command; press again to start from
 the current controller pose. Both arms can move simultaneously.
 
+Hold **Y** to return both arms to the default pose; release Y to hold the
+current joint commands. This overrides the arm grips while held and respects
+a separate joint target speed limit of **1.0 rad/s** (about 57 degrees/s), bounded by
+the arm and URDF limits. Set `--return-velocity-limit 0.25` for a slower return.
+When a direct step is blocked, a collision-constrained posture solve seeks
+clearance around the obstacle. Every step still passes collision checks; motion
+pauses if tracking is lost or no safe step is found. Controller motion rebases
+when Y is released.
+Omnihand fingers remain under trigger control.
+
 To attach both Omnihand Pro hands, use:
 
 ```bash
