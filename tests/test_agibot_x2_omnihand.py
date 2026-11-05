@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -145,7 +146,15 @@ class X2OmnihandProTests(unittest.TestCase):
                 self.assertEqual(m.geom_conaffinity[i], 0)
 
     def test_generated_files_match_sources(self):
-        for name, root in builder.build_documents().items():
+        documents = builder.build_documents()
+        self.assertEqual(
+            builder.collision_pairs(documents["x2_fixed.urdf"]), json.loads((ASSETS / "collisions.json").read_text())
+        )
+        self.assertEqual(
+            builder.articulated_collision_pairs(documents["x2_omnihand_ik.urdf"]),
+            json.loads((ASSETS / "collisions_omnihand.json").read_text()),
+        )
+        for name, root in documents.items():
             with self.subTest(file=name):
                 self.assertEqual(
                     ET.tostring(root, encoding="utf-8", xml_declaration=True), (ASSETS / name).read_bytes()
@@ -176,12 +185,17 @@ class X2OmnihandProTests(unittest.TestCase):
                 with_omnihand=True,
                 arm_velocity_limit=0.4,
                 hand_velocity_limit=0.8,
+                control_frequency=60.0,
             )
             self.assertEqual(Path(factory.call_args.args[0]).resolve(), ASSETS / "scene_omnihand.xml")
             self.assertEqual(Path(factory.call_args.args[1]).resolve(), ASSETS / "x2_omnihand_ik.urdf")
             self.assertEqual(factory.call_args.kwargs["arm_velocity_limit"], 0.4)
             self.assertEqual(factory.call_args.kwargs["hand_velocity_limit"], 0.8)
+            self.assertEqual(factory.call_args.kwargs["control_frequency"], 60.0)
             factory.return_value.run.assert_called_once()
+            factory.reset_mock()
+            entrypoint.main()
+            self.assertEqual(factory.call_args.kwargs["control_frequency"], 50.0)
             factory.reset_mock()
             with self.assertRaisesRegex(ValueError, "custom --xml-path"):
                 entrypoint.main(xml_path="custom.xml", with_omnihand=True)
@@ -227,7 +241,7 @@ class X2OmnihandProTests(unittest.TestCase):
             patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", return_value=xr),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            with self.assertRaisesRegex(ValueError, "hand-center frames do not match"):
+            with self.assertRaisesRegex(ValueError, "Omnihand Pro requires x2_omnihand_ik.urdf"):
                 AgibotX2TeleopController(str(ASSETS / "scene_omnihand.xml"), str(ASSETS / "x2_fixed.urdf"))
         self.assertTrue(xr.closed)
 
@@ -251,7 +265,7 @@ class X2OmnihandProTests(unittest.TestCase):
 
     def test_invalid_custom_actuators_are_rejected(self):
         c = self.make_controller()
-        arm_names = set(c.placo_robot.joint_names())
+        arm_names = set(c.arm_actuators.values())
         m = c.mj_model
         # A position command has different meaning with a non-unit gear or a
         # torque motor; refuse either instead of silently applying wrong forces.
@@ -368,7 +382,7 @@ class X2OmnihandProTests(unittest.TestCase):
                     for i in actuators
                 }
                 self.assertEqual(c.hand_velocity_limits, expected)
-                for joint in c.placo_robot.joint_names():
+                for joint in c.arm_actuators.values():
                     offset = c.placo_robot.get_joint_v_offset(joint)
                     self.assertAlmostEqual(c.placo_robot.model.velocity_limit[offset], 0.25)
                 for left, right in ((1.0, 0.5), (0.0, 1.0), (1.0, 0.0)):
@@ -382,6 +396,20 @@ class X2OmnihandProTests(unittest.TestCase):
                             progress = [c.mj_data.ctrl[i] / closed for i, closed in actuators.items() if closed != 0]
                             np.testing.assert_allclose(progress, progress[0], atol=1e-12)
                 self.assertFalse(np.any(c.mj_data.warning.number))
+
+    def test_hand_speed_limits_follow_configured_control_frequency(self):
+        for frequency in (25.0, 60.0, 100.0):
+            with self.subTest(frequency=frequency):
+                c = self.make_controller(control_frequency=frequency, hand_velocity_limit=1.0)
+                c.xr_client.grips.update(left_trigger=1.0, right_trigger=1.0)
+                for _ in range(3):
+                    previous = c.mj_data.ctrl.copy()
+                    c.step_control()
+                    for actuator, limit in c.hand_velocity_limits.items():
+                        self.assertLessEqual(
+                            abs(c.mj_data.ctrl[actuator] - previous[actuator]), limit / frequency + 1e-12
+                        )
+                self.assertGreater(np.linalg.norm(c.mj_data.ctrl - previous), 0)
 
     def test_repeated_motion_is_stable_and_coupled(self):
         c = self.make_controller()

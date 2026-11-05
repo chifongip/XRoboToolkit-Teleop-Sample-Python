@@ -74,8 +74,8 @@ Each **trigger** continuously closes its corresponding hand; release it to open.
 Fingers work independently of the arm grips. The hands retain their nonlinear
 finger coupling, mass, and inertia, with contacts disabled. This mode demonstrates
 hand motion without object grasping. The default arm-only model assigns no trigger
-action. Placo visualization continues to show the arm-only IK model; MuJoCo shows
-the hands. See [hand asset provenance](assets/omnihand_pro/README.md).
+action. Placo visualization includes the articulated hands and follows their
+measured finger joints. See [hand asset provenance](assets/omnihand_pro/README.md).
 
 Both modes use `left_hand_center` and `right_hand_center` for IK and target
 markers. These fixed frames sit at the bounding-box centers of the rigid hand
@@ -97,13 +97,45 @@ viewer; the headless checks below require neither a headset nor PC Service.
 python -m unittest discover -s tests -v
 ```
 
-The demo runs control at 100 Hz with 1 ms physics steps. Set the arm IK joint
-speed cap with `--arm-velocity-limit 2.0` (rad/s; default 8.0). Each arm joint
+The demo defaults to **50 Hz** control (20 ms per cycle). Set the target rate with
+`--control-frequency`, for example:
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand --control-frequency 100
+```
+
+IK integration, per-cycle command speed limits, and loop pacing use the configured
+period. Physics steps are at most 1 ms in the bundled scenes; rates such as 60 Hz
+use slightly smaller steps so each cycle advances exactly one control period.
+Collision checks can overrun the target period.
+
+Set the arm IK joint speed cap with `--arm-velocity-limit 2.0` (rad/s; default 8.0). Each arm joint
 uses the lower of this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
 shoulder pitch/roll, and 15.077 rad/s for shoulder yaw, elbows, and wrist yaw).
 With Omnihand Pro, `--hand-velocity-limit` separately caps actuated finger target
 speeds (rad/s; default 2.0), also bounded by each joint's supplied hand URDF limit.
 The former `--velocity-limit` option is now `--arm-velocity-limit`.
+
+Self-collision avoidance is enabled for both X2 modes. Placo uses fitted cylinders
+and compact boxes for the body and arms, with rounded torso sections. Each
+Omnihand preserves its bundled URDF joint chains and collision primitives, updated
+from all measured finger joints, including passive coupled joints.
+`--collision-margin 0.02` sets the minimum commanded clearance in meters;
+`--collision-trigger 0.08` activates avoidance within 8 cm and must exceed the
+margin. End-effector tracking yields to this hard constraint. The controller
+also checks sampled motion from measured positions and previous servo targets
+to the outgoing targets, including the held targets of released arms. Invalid
+solutions hold the previous commands. Custom IK URDFs must provide collision
+geometry and joints for the same configured links. The Omnihand IK model includes
+14 arm and 38 observed finger joints; finger DOFs are masked during arm IK.
+Every changed arm/hand command is checked as a combined configuration, including
+held finger targets. Sampled finger motion follows the source MJCF polynomial
+coupling, with passive-joint tracking error carried from the measured state.
+If measured clearance drops below the margin, holding the affected arm's grip
+allows gradual recovery within the joint speed limits. Existing violations must
+improve without worsening other pairs or creating new violations. Recovery also
+checks intermediate poses and shortens steps when needed; releasing the grip
+continues to hold that arm.
 
 ```bash
 python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand --arm-velocity-limit 4.0 --hand-velocity-limit 1.0
@@ -142,8 +174,11 @@ serializes the native predicted controller poses, and the
 parses them without an axis conversion. This verifies the source-level mapping;
 the installed headset app's behavior still requires a live direction check.
 
-This is simulation only, without self-collision avoidance,
-grasping, or locomotion. See [model provenance and limitations](assets/agibot/x2/README.md).
+This is simulation only, without grasping or locomotion. Collision avoidance
+uses conservative primitives and sampled joint-space checks; it does not guarantee
+collision-free physics motion, check the environment, or resolve contacts
+between fingers. MuJoCo self-contact forces remain disabled.
+See [model provenance, collision pairs, and timing](assets/agibot/x2/README.md).
 
 ### Running the Placo Visualization Demo
 

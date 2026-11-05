@@ -18,6 +18,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="pelvis_box_0">
+      <origin xyz="-0.005442418158054352 0.0 0.0013035349547863007" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.14250047099590302 0.173762153506279 0.13511298936605454" />
+      </geometry>
+    </collision>
   </link>
   <link name="imu_in_pelvis_link">
     <visual>
@@ -48,6 +54,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_hip_pitch_link_cylinder_0">
+      <origin xyz="-0.0020749997347593307 0.05715388459874626 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.07136624517837153" length="0.077849998742342" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_pitch_joint" type="fixed">
     <origin xyz="0 0.0713499997541465 0" rpy="0 0 0" />
@@ -69,6 +81,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_hip_roll_link_cylinder_0">
+      <origin xyz="0.0005747303366661072 -3.0590847913610538e-06 -0.09836860373616219" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.06500027126134499" length="0.10024999421834946" />
+      </geometry>
+    </collision>
+    <collision name="left_hip_roll_link_box_1">
+      <origin xyz="0.000574858429452485 0.00010146770410102146 -0.00011860951781273582" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.130000286335904 0.09040193397864425 0.10024999421834947" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_roll_joint" type="fixed">
     <origin xyz="-0.000574999999960968 0.0657000000000312 0" rpy="0 0 0" />
@@ -90,6 +114,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_hip_yaw_link_box_0">
+      <origin xyz="-0.005659746006131172 -9.307710516909262e-08 -0.18663265576469712" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13731949743628502 0.08434966345244872 0.12565974445128814" />
+      </geometry>
+    </collision>
+    <collision name="left_hip_yaw_link_cylinder_1">
+      <origin xyz="7.243726961932151e-05 -8.940696716308594e-08 -0.06297291131340899" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.059072357830035935" length="0.12565974445128814" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_yaw_joint" type="fixed">
     <origin xyz="0.000574999999972778 0 -0.136850000000045" rpy="0 0 0" />
@@ -111,6 +147,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_knee_link_box_0">
+      <origin xyz="0.0032899939486449557 -0.00022534510369189367 -0.21422292571514845" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12061173037390596 0.09352683341427387 0.17940490473806858" />
+      </geometry>
+    </collision>
+    <collision name="left_knee_link_box_1">
+      <origin xyz="0.002789262682199478 -0.00022505596280097961 -0.03681802097707987" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12232241374254227 0.1089156751036644 0.17940490473806858" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_knee_joint" type="fixed">
     <origin xyz="-0.00765999999995284 0.000225000000070329 -0.18309999999998" rpy="0 0 0" />
@@ -132,6 +180,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_ankle_pitch_link_cylinder_0">
+      <origin xyz="-0.0011500008404254913 3.075415442553575e-07 1.4344788689182875e-06" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.038067499340062275" length="0.08190000396966934" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_ankle_pitch_joint" type="fixed">
     <origin xyz="-0.0100000000000136 -0.000124910735236235 -0.282000000000081" rpy="0 0 0" />
@@ -153,6 +207,12 @@
         <color rgba="1.0 0.5 0.0 1" />
       </material>
     </visual>
+    <collision name="left_ankle_roll_link_box_0">
+      <origin xyz="0.03818071633577347 1.3373792171478271e-05 -0.02068503573536873" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.2215558100938797 0.13104267013072968 0.10737014156579971" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_ankle_roll_joint" type="fixed">
     <origin xyz="-0.00174999998947351 0 0" rpy="0 0 0" />
@@ -174,6 +234,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_hip_pitch_link_cylinder_0">
+      <origin xyz="-0.0024699699133634567 -0.05715388481997521 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.07136624495719288" length="0.07706005838513375" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_pitch_joint" type="fixed">
     <origin xyz="0 -0.0713499997541464 0" rpy="0 0 0" />
@@ -195,6 +261,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_hip_roll_link_cylinder_0">
+      <origin xyz="2.7194619178771973e-07 3.1527338926217476e-06 -0.0983685813844204" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.06500026753605465" length="0.10025003892183305" />
+      </geometry>
+    </collision>
+    <collision name="right_hip_roll_link_box_1">
+      <origin xyz="1.455842569414445e-07 -0.00010142342847738531 -0.0001185424625873635" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13000028234702646 0.09040183201635191 0.10025003892183305" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_roll_joint" type="fixed">
     <origin xyz="0 -0.0657000004916197 0" rpy="0 0 0" />
@@ -216,6 +294,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_hip_yaw_link_box_0">
+      <origin xyz="-0.005659746006131172 1.9738523288417853e-07 -0.18663265454233624" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13731949743628502 0.08434966513791178 0.1256597468960099" />
+      </geometry>
+    </collision>
+    <collision name="right_hip_yaw_link_cylinder_1">
+      <origin xyz="7.243726802455552e-05 1.9371509552001953e-07 -0.06297290764632635" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.0590723578314483" length="0.1256597468960099" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_yaw_joint" type="fixed">
     <origin xyz="0 0 -0.136850000000023" rpy="0 0 0" />
@@ -237,6 +327,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_knee_link_box_0">
+      <origin xyz="0.0032899939486449557 0.00022497804386133885 -0.21422292571514845" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12061173037390596 0.09352683408084676 0.17940490473806858" />
+      </geometry>
+    </collision>
+    <collision name="right_knee_link_box_1">
+      <origin xyz="0.002789262682199478 0.00022524595260620117 -0.03681802097707987" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12232241374254227 0.1089156676530838 0.17940490473806858" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_knee_joint" type="fixed">
     <origin xyz="-0.00766000000003646 -0.000225000000000253 -0.183100000000014" rpy="0 0 0" />
@@ -258,6 +360,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_ankle_pitch_link_cylinder_0">
+      <origin xyz="-0.0011500008404254913 3.075415442553575e-07 1.4344788689182875e-06" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.038067499340062275" length="0.08190000396966934" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_ankle_pitch_joint" type="fixed">
     <origin xyz="-0.00999999999984942 0.000124910735223305 -0.282000000000021" rpy="0 0 0" />
@@ -279,6 +387,12 @@
         <color rgba="1.0 0.5 0.0 1" />
       </material>
     </visual>
+    <collision name="right_ankle_roll_link_box_0">
+      <origin xyz="0.03818071633577347 1.3355165719985962e-05 -0.020685072988271713" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.2215558100938797 0.13104266268014908 0.10737014156579971" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_ankle_roll_joint" type="fixed">
     <origin xyz="-0.00174999998537372 0 0" rpy="0 0 0" />
@@ -300,6 +414,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="waist_yaw_link_cylinder_0">
+      <origin xyz="-8.135741287260134e-07 -7.121790890490809e-07 0.051793073827866465" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.07050000525094909" length="0.109426141272299" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0.0670600000000297" rpy="0 0 0" />
@@ -321,6 +441,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="waist_pitch_link_box_0">
+      <origin xyz="0.01330121187493205 0.0 0.0" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.05859757647663355 0.06919999760389328 0.03199760396778584" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_pitch_joint" type="fixed">
     <origin xyz="0 0 0.0880106468356499" rpy="0 0 0" />
@@ -342,6 +468,102 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="torso_link_cylinder_0">
+      <origin xyz="0.012800001539289951 -0.035922334256611003 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.033414326030727984" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_1">
+      <origin xyz="0.012800001539289951 -0.011823404580354692 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03324582006271467" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_2">
+      <origin xyz="0.012800001539289951 0.011823404580354692 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03324582006271467" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_3">
+      <origin xyz="0.012800001539289951 0.036106804225531364 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03348463471645645" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_4">
+      <origin xyz="0.0010968574743599518 -2.222093912679357e-06 0.055847754585556686" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10813605582082544" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_5">
+      <origin xyz="-0.00044701421052600887 -0.017096132398409666 0.10474366985727102" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10895484364782836" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_6">
+      <origin xyz="-0.0004470142105260366 0.017110936885102818 0.10474366985727102" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.1089568010838323" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_7">
+      <origin xyz="-0.005341320183655518 -0.01897234853657218 0.15363958512898535" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11599081810485812" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_8">
+      <origin xyz="-0.005341320183655504 0.01895755538544526 0.15363958512898535" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11599088752778582" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_9">
+      <origin xyz="-0.007200284791830547 -0.04756773127454806 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11244664252960318" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_10">
+      <origin xyz="-0.00875427233089665 0.0015198009661980608 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12332044997833973" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_11">
+      <origin xyz="-0.005765643268931711 0.0529239535331726 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10900644101673142" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_12">
+      <origin xyz="-0.00668564074781889 -0.038082596767379406 0.251431415672414" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12068628585341018" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_13">
+      <origin xyz="-0.006685640747818897 0.038084217247269396 0.251431415672414" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12068668651137657" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_14">
+      <origin xyz="-0.03395415593230727 2.1116770664686424e-05 0.30032733094412833" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.14833860543807917" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_box_15">
+      <origin xyz="-0.0814999141922227 -2.6747107325711394e-06 0.34922324621584266" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.19914391410826507 0.2084344363377031 0.05089591527171433" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_roll_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -380,6 +602,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_pitch_link_cylinder_0">
+      <origin xyz="-0.0016268137842416763 0.043697510059169276 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.051902710895561706" length="0.07178423520922661" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_pitch_joint" type="revolute">
     <origin xyz="0.00329906676354264 0.143031506663431 0.241647721005027" rpy="0.209439453777995 0 0" />
@@ -403,6 +631,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_roll_link_cylinder_0">
+      <origin xyz="0.0006457679542490741 -4.74740623186698e-06 -0.08652631565928459" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.048648445644376107" length="0.0881629918217659" />
+      </geometry>
+    </collision>
+    <collision name="left_shoulder_roll_link_box_1">
+      <origin xyz="0.0004452969878911972 -6.742775440216064e-07 -0.000363323837518692" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.10688886013627052 0.08700465750694275 0.0881629918217659" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_roll_joint" type="revolute">
     <origin xyz="-0.000499991072907324 0.0495 0" rpy="0 0 0" />
@@ -426,6 +666,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_yaw_link_box_0">
+      <origin xyz="0.003107501193881035 5.405844732714327e-06 -0.08527049794793129" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.09231100198626518 0.08093479978466617 0.07218043845891953" />
+      </geometry>
+    </collision>
+    <collision name="left_shoulder_yaw_link_cylinder_1">
+      <origin xyz="-5.491653880440768e-05 -1.6288092186469982e-06 -0.015090059489011768" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.04300042205936344" length="0.07218043845891953" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_yaw_joint" type="revolute">
     <origin xyz="0.00122423638490546 0 -0.121194848262102" rpy="0 -0.00597565694965793 0" />
@@ -449,6 +701,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_elbow_link_cylinder_0">
+      <origin xyz="-0.012714304718994422 0.001649223265295291 -0.08734386088326573" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.04297690003466157" length="0.07857625433057547" />
+      </geometry>
+    </collision>
+    <collision name="left_elbow_link_box_1">
+      <origin xyz="-0.013028723187744617 0.0024993965603716285 -0.010767606552690268" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08292326484620571 0.08593160510504105 0.07857625433057547" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_elbow_joint" type="revolute">
     <origin xyz="0.0140000000488655 0.000199986464082369 -0.0829500000002385" rpy="0 0.00597565694965793 0" />
@@ -472,6 +736,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_wrist_yaw_link_box_0">
+      <origin xyz="0.000278578720173641 0.0009767658355669812 -0.07392655458534136" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.04572687604688794 0.08904706592503456 0.053143464515917005" />
+      </geometry>
+    </collision>
+    <collision name="left_wrist_yaw_link_box_1">
+      <origin xyz="6.99162483215332e-05 0.00022662244737148285 -0.02278309006942436" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.0822760198712349 0.08754680272936821 0.053143464515917005" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_yaw_joint" type="revolute">
     <origin xyz="-0.0132797235062217 -9.75487744990788E-05 -0.120575783591803" rpy="0 0 0" />
@@ -495,6 +771,12 @@
         <color rgba="0.3 0.3 0.3 1" />
       </material>
     </visual>
+    <collision name="left_wrist_pitch_link_cylinder_0">
+      <origin xyz="-0.0002500023692846298 -0.0014888267166771503 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.03107244705456916" length="0.07250001993775368" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_pitch_joint" type="revolute">
     <origin xyz="0.000490001227040848 0 -0.0819985359552045" rpy="0 -0.00597566028430406 0" />
@@ -518,6 +800,30 @@
         <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
       </material>
     </visual>
+    <collision name="left_wrist_roll_link_box_0">
+      <origin xyz="0.00015173726265977196 -0.005556265615305446 -0.15370211997310373" rpy="-2.004646940508273 0.09949571108046097 -0.018755999204713793" />
+      <geometry>
+        <box size="0.07219904843205759 0.05953091627024422 0.02307176059478005" />
+      </geometry>
+    </collision>
+    <collision name="left_wrist_roll_link_box_1">
+      <origin xyz="0.010581688955426216 -0.01190205558373384 -0.10737600037828088" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.09118530866503716 0.06793801291319028 0.051550400115549566" />
+      </geometry>
+    </collision>
+    <collision name="left_wrist_roll_link_box_2">
+      <origin xyz="0.005789509119346892 -0.004830000187641369 -0.057825600262731314" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08143299989125956 0.06395255967117545 0.051550400115549566" />
+      </geometry>
+    </collision>
+    <collision name="left_wrist_roll_link_box_3">
+      <origin xyz="-0.00224999338388443 0.0 -0.00827520014718175" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08150001955032349 0.03500007432699204 0.051550400115549566" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_roll_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -541,6 +847,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_pitch_link_cylinder_0">
+      <origin xyz="-0.0017374716699123383 -0.04369947434661704 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.05190037416077929" length="0.07148864459991455" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_pitch_joint" type="revolute">
     <origin xyz="0.00330093831251838 -0.143030971450747 0.241648201390685" rpy="-0.209442812383636 0 0" />
@@ -564,6 +876,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_roll_link_cylinder_0">
+      <origin xyz="0.0006457135206975953 5.277542032972038e-06 -0.08648251462727785" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.048656885840418204" length="0.08813496087491512" />
+      </geometry>
+    </collision>
+    <collision name="right_shoulder_roll_link_box_1">
+      <origin xyz="0.0004433039575815201 2.4959444999694824e-07 -0.0003475537523627281" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.10688876327872276 0.08700484377145767 0.08813496087491512" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_roll_joint" type="revolute">
     <origin xyz="-0.000499999994070091 -0.0495000000000002 0" rpy="0 0.000154003092926045 0" />
@@ -587,6 +911,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_yaw_link_box_0">
+      <origin xyz="0.0036277517650051896 -1.3284209101120659e-05 -0.08366043865680695" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.09127023262311539 0.08159239723003493 0.07127122175693512" />
+      </geometry>
+    </collision>
+    <collision name="right_shoulder_yaw_link_cylinder_1">
+      <origin xyz="0.000662389989206133 1.1856992263419843e-06 -0.01438921689987183" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.043050164346391126" length="0.07127122175693512" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_yaw_joint" type="revolute">
     <origin xyz="0.000499999999999765 0 -0.121199999999934" rpy="0 0 0" />
@@ -610,6 +946,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_elbow_link_cylinder_0">
+      <origin xyz="-0.011450542460027826 -0.0016509739659330905 -0.08721815049648285" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.042979424102979516" length="0.07855224204063416" />
+      </geometry>
+    </collision>
+    <collision name="right_elbow_link_box_1">
+      <origin xyz="-0.011770672164857388 -0.002472749531666766 -0.010665908455848694" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <box size="0.07855224204063416 0.08292729933559895 0.08598444467703437" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_elbow_joint" type="revolute">
     <origin xyz="0.0139999999999662 -0.0002000000000143 -0.0829500000000745" rpy="0 0 0" />
@@ -633,6 +981,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_wrist_yaw_link_box_0">
+      <origin xyz="0.0013421329531970623 -0.0009758269702535884 -0.07372502097859979" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.047592236124528106 0.08904715551631809 0.05314996712654829" />
+      </geometry>
+    </collision>
+    <collision name="right_wrist_yaw_link_box_1">
+      <origin xyz="0.0020611416548490524 -0.0002259090542793274 -0.022575053852051497" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <box size="0.05314996712654829 0.082283273011446 0.08754813265800476" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_yaw_joint" type="revolute">
     <origin xyz="-0.0140000017961392 9.7526096753231E-05 -0.120694276209686" rpy="0 0 3.27341906322599E-05" />
@@ -656,6 +1016,12 @@
         <color rgba="0.3 0.3 0.3 1" />
       </material>
     </visual>
+    <collision name="right_wrist_pitch_link_cylinder_0">
+      <origin xyz="-0.00025000423192977905 0.0014888267166771468 -1.214306433183765e-17" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.031072447054569165" length="0.07250003856420517" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_pitch_joint" type="revolute">
     <origin xyz="0 0 -0.081799999999999" rpy="0 0 -3.27341932546355E-05" />
@@ -679,6 +1045,30 @@
         <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
       </material>
     </visual>
+    <collision name="right_wrist_roll_link_box_0">
+      <origin xyz="0.00040351697660036284 0.0052523085302263895 -0.15380723675578845" rpy="-1.3281932549435236 1.1390016111322236 1.8120763939994127" />
+      <geometry>
+        <box size="0.059553288583872044 0.022814787229580205 0.07226303340414925" />
+      </geometry>
+    </collision>
+    <collision name="right_wrist_roll_link_box_1">
+      <origin xyz="0.010850261896848679 0.011756251028314508 -0.10738881537690759" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <box size="0.06795712448927706 0.05155552611500025 0.09116556835174561" />
+      </geometry>
+    </collision>
+    <collision name="right_wrist_roll_link_box_2">
+      <origin xyz="0.00592451292828932 0.004689721500306249 -0.05783328926190734" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08168818908831584 0.06397273380642915 0.05155552611500025" />
+      </geometry>
+    </collision>
+    <collision name="right_wrist_roll_link_box_3">
+      <origin xyz="-0.002250000834465027 0.0 -0.008277763146907091" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.0815000046491623 0.03499999982118607 0.05155552611500025" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_roll_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -702,6 +1092,12 @@
         <color rgba="0.866666666666667 0.866666666666667 0.890196078431372 1" />
       </material>
     </visual>
+    <collision name="head_yaw_link_cylinder_0">
+      <origin xyz="-0.013985252091892601 4.440188413452857e-05 0.00795047590509057" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.059485324373648354" length="0.03830132880061865" />
+      </geometry>
+    </collision>
   </link>
   <joint name="head_yaw_joint" type="fixed">
     <origin xyz="0.00834772789983268 0 0.309397077276121" rpy="0 0 0" />
@@ -723,6 +1119,12 @@
         <color rgba="0.2 0.2 0.2 1" />
       </material>
     </visual>
+    <collision name="head_pitch_link_cylinder_0">
+      <origin xyz="0.004730823503652171 0.0 0.005260746109249079" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <cylinder radius="0.09206639842941085" length="0.14419927787780762" />
+      </geometry>
+    </collision>
   </link>
   <joint name="head_pitch_joint" type="fixed">
     <origin xyz="0 0 0.0889" rpy="0 0 0" />

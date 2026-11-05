@@ -18,6 +18,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="pelvis_box_0">
+      <origin xyz="-0.005442418158054352 0.0 0.0013035349547863007" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.14250047099590302 0.173762153506279 0.13511298936605454" />
+      </geometry>
+    </collision>
   </link>
   <link name="imu_in_pelvis_link">
     <visual>
@@ -48,6 +54,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_hip_pitch_link_cylinder_0">
+      <origin xyz="-0.0020749997347593307 0.05715388459874626 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.07136624517837153" length="0.077849998742342" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_pitch_joint" type="fixed">
     <origin xyz="0 0.0713499997541465 0" rpy="0 0 0" />
@@ -69,6 +81,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_hip_roll_link_cylinder_0">
+      <origin xyz="0.0005747303366661072 -3.0590847913610538e-06 -0.09836860373616219" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.06500027126134499" length="0.10024999421834946" />
+      </geometry>
+    </collision>
+    <collision name="left_hip_roll_link_box_1">
+      <origin xyz="0.000574858429452485 0.00010146770410102146 -0.00011860951781273582" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.130000286335904 0.09040193397864425 0.10024999421834947" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_roll_joint" type="fixed">
     <origin xyz="-0.000574999999960968 0.0657000000000312 0" rpy="0 0 0" />
@@ -90,6 +114,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_hip_yaw_link_box_0">
+      <origin xyz="-0.005659746006131172 -9.307710516909262e-08 -0.18663265576469712" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13731949743628502 0.08434966345244872 0.12565974445128814" />
+      </geometry>
+    </collision>
+    <collision name="left_hip_yaw_link_cylinder_1">
+      <origin xyz="7.243726961932151e-05 -8.940696716308594e-08 -0.06297291131340899" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.059072357830035935" length="0.12565974445128814" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_hip_yaw_joint" type="fixed">
     <origin xyz="0.000574999999972778 0 -0.136850000000045" rpy="0 0 0" />
@@ -111,6 +147,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_knee_link_box_0">
+      <origin xyz="0.0032899939486449557 -0.00022534510369189367 -0.21422292571514845" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12061173037390596 0.09352683341427387 0.17940490473806858" />
+      </geometry>
+    </collision>
+    <collision name="left_knee_link_box_1">
+      <origin xyz="0.002789262682199478 -0.00022505596280097961 -0.03681802097707987" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12232241374254227 0.1089156751036644 0.17940490473806858" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_knee_joint" type="fixed">
     <origin xyz="-0.00765999999995284 0.000225000000070329 -0.18309999999998" rpy="0 0 0" />
@@ -132,6 +180,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_ankle_pitch_link_cylinder_0">
+      <origin xyz="-0.0011500008404254913 3.075415442553575e-07 1.4344788689182875e-06" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.038067499340062275" length="0.08190000396966934" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_ankle_pitch_joint" type="fixed">
     <origin xyz="-0.0100000000000136 -0.000124910735236235 -0.282000000000081" rpy="0 0 0" />
@@ -153,6 +207,12 @@
         <color rgba="1.0 0.5 0.0 1" />
       </material>
     </visual>
+    <collision name="left_ankle_roll_link_box_0">
+      <origin xyz="0.03818071633577347 1.3373792171478271e-05 -0.02068503573536873" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.2215558100938797 0.13104267013072968 0.10737014156579971" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_ankle_roll_joint" type="fixed">
     <origin xyz="-0.00174999998947351 0 0" rpy="0 0 0" />
@@ -174,6 +234,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_hip_pitch_link_cylinder_0">
+      <origin xyz="-0.0024699699133634567 -0.05715388481997521 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.07136624495719288" length="0.07706005838513375" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_pitch_joint" type="fixed">
     <origin xyz="0 -0.0713499997541464 0" rpy="0 0 0" />
@@ -195,6 +261,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_hip_roll_link_cylinder_0">
+      <origin xyz="2.7194619178771973e-07 3.1527338926217476e-06 -0.0983685813844204" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.06500026753605465" length="0.10025003892183305" />
+      </geometry>
+    </collision>
+    <collision name="right_hip_roll_link_box_1">
+      <origin xyz="1.455842569414445e-07 -0.00010142342847738531 -0.0001185424625873635" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13000028234702646 0.09040183201635191 0.10025003892183305" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_roll_joint" type="fixed">
     <origin xyz="0 -0.0657000004916197 0" rpy="0 0 0" />
@@ -216,6 +294,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_hip_yaw_link_box_0">
+      <origin xyz="-0.005659746006131172 1.9738523288417853e-07 -0.18663265454233624" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.13731949743628502 0.08434966513791178 0.1256597468960099" />
+      </geometry>
+    </collision>
+    <collision name="right_hip_yaw_link_cylinder_1">
+      <origin xyz="7.243726802455552e-05 1.9371509552001953e-07 -0.06297290764632635" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.0590723578314483" length="0.1256597468960099" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_hip_yaw_joint" type="fixed">
     <origin xyz="0 0 -0.136850000000023" rpy="0 0 0" />
@@ -237,6 +327,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_knee_link_box_0">
+      <origin xyz="0.0032899939486449557 0.00022497804386133885 -0.21422292571514845" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12061173037390596 0.09352683408084676 0.17940490473806858" />
+      </geometry>
+    </collision>
+    <collision name="right_knee_link_box_1">
+      <origin xyz="0.002789262682199478 0.00022524595260620117 -0.03681802097707987" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.12232241374254227 0.1089156676530838 0.17940490473806858" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_knee_joint" type="fixed">
     <origin xyz="-0.00766000000003646 -0.000225000000000253 -0.183100000000014" rpy="0 0 0" />
@@ -258,6 +360,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_ankle_pitch_link_cylinder_0">
+      <origin xyz="-0.0011500008404254913 3.075415442553575e-07 1.4344788689182875e-06" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.038067499340062275" length="0.08190000396966934" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_ankle_pitch_joint" type="fixed">
     <origin xyz="-0.00999999999984942 0.000124910735223305 -0.282000000000021" rpy="0 0 0" />
@@ -279,6 +387,12 @@
         <color rgba="1.0 0.5 0.0 1" />
       </material>
     </visual>
+    <collision name="right_ankle_roll_link_box_0">
+      <origin xyz="0.03818071633577347 1.3355165719985962e-05 -0.020685072988271713" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.2215558100938797 0.13104266268014908 0.10737014156579971" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_ankle_roll_joint" type="fixed">
     <origin xyz="-0.00174999998537372 0 0" rpy="0 0 0" />
@@ -300,6 +414,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="waist_yaw_link_cylinder_0">
+      <origin xyz="-8.135741287260134e-07 -7.121790890490809e-07 0.051793073827866465" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.07050000525094909" length="0.109426141272299" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0.0670600000000297" rpy="0 0 0" />
@@ -321,6 +441,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="waist_pitch_link_box_0">
+      <origin xyz="0.01330121187493205 0.0 0.0" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.05859757647663355 0.06919999760389328 0.03199760396778584" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_pitch_joint" type="fixed">
     <origin xyz="0 0 0.0880106468356499" rpy="0 0 0" />
@@ -342,6 +468,102 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="torso_link_cylinder_0">
+      <origin xyz="0.012800001539289951 -0.035922334256611003 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.033414326030727984" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_1">
+      <origin xyz="0.012800001539289951 -0.011823404580354692 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03324582006271467" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_2">
+      <origin xyz="0.012800001539289951 0.011823404580354692 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03324582006271467" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_3">
+      <origin xyz="0.012800001539289951 0.036106804225531364 0.006951839313842356" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.03348463471645645" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_4">
+      <origin xyz="0.0010968574743599518 -2.222093912679357e-06 0.055847754585556686" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10813605582082544" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_5">
+      <origin xyz="-0.00044701421052600887 -0.017096132398409666 0.10474366985727102" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10895484364782836" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_6">
+      <origin xyz="-0.0004470142105260366 0.017110936885102818 0.10474366985727102" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.1089568010838323" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_7">
+      <origin xyz="-0.005341320183655518 -0.01897234853657218 0.15363958512898535" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11599081810485812" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_8">
+      <origin xyz="-0.005341320183655504 0.01895755538544526 0.15363958512898535" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11599088752778582" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_9">
+      <origin xyz="-0.007200284791830547 -0.04756773127454806 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.11244664252960318" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_10">
+      <origin xyz="-0.00875427233089665 0.0015198009661980608 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12332044997833973" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_11">
+      <origin xyz="-0.005765643268931711 0.0529239535331726 0.20253550040069968" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.10900644101673142" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_12">
+      <origin xyz="-0.00668564074781889 -0.038082596767379406 0.251431415672414" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12068628585341018" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_13">
+      <origin xyz="-0.006685640747818897 0.038084217247269396 0.251431415672414" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.12068668651137657" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_cylinder_14">
+      <origin xyz="-0.03395415593230727 2.1116770664686424e-05 0.30032733094412833" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.14833860543807917" length="0.05089591527171433" />
+      </geometry>
+    </collision>
+    <collision name="torso_link_box_15">
+      <origin xyz="-0.0814999141922227 -2.6747107325711394e-06 0.34922324621584266" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.19914391410826507 0.2084344363377031 0.05089591527171433" />
+      </geometry>
+    </collision>
   </link>
   <joint name="waist_roll_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -380,6 +602,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_pitch_link_cylinder_0">
+      <origin xyz="-0.0016268137842416763 0.043697510059169276 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.051902710895561706" length="0.07178423520922661" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_pitch_joint" type="revolute">
     <origin xyz="0.00329906676354264 0.143031506663431 0.241647721005027" rpy="0.209439453777995 0 0" />
@@ -403,6 +631,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_roll_link_cylinder_0">
+      <origin xyz="0.0006457679542490741 -4.74740623186698e-06 -0.08652631565928459" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.048648445644376107" length="0.0881629918217659" />
+      </geometry>
+    </collision>
+    <collision name="left_shoulder_roll_link_box_1">
+      <origin xyz="0.0004452969878911972 -6.742775440216064e-07 -0.000363323837518692" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.10688886013627052 0.08700465750694275 0.0881629918217659" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_roll_joint" type="revolute">
     <origin xyz="-0.000499991072907324 0.0495 0" rpy="0 0 0" />
@@ -426,6 +666,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_shoulder_yaw_link_box_0">
+      <origin xyz="0.003107501193881035 5.405844732714327e-06 -0.08527049794793129" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.09231100198626518 0.08093479978466617 0.07218043845891953" />
+      </geometry>
+    </collision>
+    <collision name="left_shoulder_yaw_link_cylinder_1">
+      <origin xyz="-5.491653880440768e-05 -1.6288092186469982e-06 -0.015090059489011768" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.04300042205936344" length="0.07218043845891953" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_shoulder_yaw_joint" type="revolute">
     <origin xyz="0.00122423638490546 0 -0.121194848262102" rpy="0 -0.00597565694965793 0" />
@@ -449,6 +701,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_elbow_link_cylinder_0">
+      <origin xyz="-0.012714304718994422 0.001649223265295291 -0.08734386088326573" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.04297690003466157" length="0.07857625433057547" />
+      </geometry>
+    </collision>
+    <collision name="left_elbow_link_box_1">
+      <origin xyz="-0.013028723187744617 0.0024993965603716285 -0.010767606552690268" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08292326484620571 0.08593160510504105 0.07857625433057547" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_elbow_joint" type="revolute">
     <origin xyz="0.0140000000488655 0.000199986464082369 -0.0829500000002385" rpy="0 0.00597565694965793 0" />
@@ -472,6 +736,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="left_wrist_yaw_link_box_0">
+      <origin xyz="0.000278578720173641 0.0009767658355669812 -0.07392655458534136" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.04572687604688794 0.08904706592503456 0.053143464515917005" />
+      </geometry>
+    </collision>
+    <collision name="left_wrist_yaw_link_box_1">
+      <origin xyz="6.99162483215332e-05 0.00022662244737148285 -0.02278309006942436" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.0822760198712349 0.08754680272936821 0.053143464515917005" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_yaw_joint" type="revolute">
     <origin xyz="-0.0132797235062217 -9.75487744990788E-05 -0.120575783591803" rpy="0 0 0" />
@@ -495,6 +771,12 @@
         <color rgba="0.3 0.3 0.3 1" />
       </material>
     </visual>
+    <collision name="left_wrist_pitch_link_cylinder_0">
+      <origin xyz="-0.0002500023692846298 -0.0014888267166771503 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.03107244705456916" length="0.07250001993775368" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_pitch_joint" type="revolute">
     <origin xyz="0.000490001227040848 0 -0.0819985359552045" rpy="0 -0.00597566028430406 0" />
@@ -518,6 +800,12 @@
       <mass value="0.081" />
       <inertia ixx="0.00005239" ixy="-0.00000010" ixz="0.00000245" iyy=" 0.00011762" iyz="-0.00000066" izz=" 0.00007906" />
     </inertial>
+    <collision name="left_wrist_roll_link_box_0">
+      <origin xyz="-0.0023500006645917892 -0.001499990001320839 -0.021749999839812517" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08570000496506691 0.03669998389482498 0.07549999900907278" />
+      </geometry>
+    </collision>
   </link>
   <joint name="left_wrist_roll_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -541,6 +829,12 @@
         <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_pitch_link_cylinder_0">
+      <origin xyz="-0.0017374716699123383 -0.04369947434661704 0.0" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.05190037416077929" length="0.07148864459991455" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_pitch_joint" type="revolute">
     <origin xyz="0.00330093831251838 -0.143030971450747 0.241648201390685" rpy="-0.209442812383636 0 0" />
@@ -564,6 +858,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_roll_link_cylinder_0">
+      <origin xyz="0.0006457135206975953 5.277542032972038e-06 -0.08648251462727785" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.048656885840418204" length="0.08813496087491512" />
+      </geometry>
+    </collision>
+    <collision name="right_shoulder_roll_link_box_1">
+      <origin xyz="0.0004433039575815201 2.4959444999694824e-07 -0.0003475537523627281" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.10688876327872276 0.08700484377145767 0.08813496087491512" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_roll_joint" type="revolute">
     <origin xyz="-0.000499999994070091 -0.0495000000000002 0" rpy="0 0.000154003092926045 0" />
@@ -587,6 +893,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_shoulder_yaw_link_box_0">
+      <origin xyz="0.0036277517650051896 -1.3284209101120659e-05 -0.08366043865680695" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.09127023262311539 0.08159239723003493 0.07127122175693512" />
+      </geometry>
+    </collision>
+    <collision name="right_shoulder_yaw_link_cylinder_1">
+      <origin xyz="0.000662389989206133 1.1856992263419843e-06 -0.01438921689987183" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.043050164346391126" length="0.07127122175693512" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_shoulder_yaw_joint" type="revolute">
     <origin xyz="0.000499999999999765 0 -0.121199999999934" rpy="0 0 0" />
@@ -610,6 +928,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_elbow_link_cylinder_0">
+      <origin xyz="-0.011450542460027826 -0.0016509739659330905 -0.08721815049648285" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.042979424102979516" length="0.07855224204063416" />
+      </geometry>
+    </collision>
+    <collision name="right_elbow_link_box_1">
+      <origin xyz="-0.011770672164857388 -0.002472749531666766 -0.010665908455848694" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <box size="0.07855224204063416 0.08292729933559895 0.08598444467703437" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_elbow_joint" type="revolute">
     <origin xyz="0.0139999999999662 -0.0002000000000143 -0.0829500000000745" rpy="0 0 0" />
@@ -633,6 +963,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision name="right_wrist_yaw_link_box_0">
+      <origin xyz="0.0013421329531970623 -0.0009758269702535884 -0.07372502097859979" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.047592236124528106 0.08904715551631809 0.05314996712654829" />
+      </geometry>
+    </collision>
+    <collision name="right_wrist_yaw_link_box_1">
+      <origin xyz="0.0020611416548490524 -0.0002259090542793274 -0.022575053852051497" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <box size="0.05314996712654829 0.082283273011446 0.08754813265800476" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_yaw_joint" type="revolute">
     <origin xyz="-0.0140000017961392 9.7526096753231E-05 -0.120694276209686" rpy="0 0 3.27341906322599E-05" />
@@ -656,6 +998,12 @@
         <color rgba="0.3 0.3 0.3 1" />
       </material>
     </visual>
+    <collision name="right_wrist_pitch_link_cylinder_0">
+      <origin xyz="-0.00025000423192977905 0.0014888267166771468 -1.214306433183765e-17" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <cylinder radius="0.031072447054569165" length="0.07250003856420517" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_pitch_joint" type="revolute">
     <origin xyz="0 0 -0.081799999999999" rpy="0 0 -3.27341932546355E-05" />
@@ -679,6 +1027,12 @@
       <mass value="0.081" />
       <inertia ixx="0.00005226" ixy="0.00000011" ixz="0.00000229" iyy=" 0.00011702" iyz="0.00000064" izz="0.00007859" />
     </inertial>
+    <collision name="right_wrist_roll_link_box_0">
+      <origin xyz="-0.0023500006645917892 0.001461992971599102 -0.021756738889962435" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.08570000496506691 0.03670946289598942 0.07551346965879202" />
+      </geometry>
+    </collision>
   </link>
   <joint name="right_wrist_roll_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -702,6 +1056,12 @@
         <color rgba="0.866666666666667 0.866666666666667 0.890196078431372 1" />
       </material>
     </visual>
+    <collision name="head_yaw_link_cylinder_0">
+      <origin xyz="-0.013985252091892601 4.440188413452857e-05 0.00795047590509057" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.059485324373648354" length="0.03830132880061865" />
+      </geometry>
+    </collision>
   </link>
   <joint name="head_yaw_joint" type="fixed">
     <origin xyz="0.00834772789983268 0 0.309397077276121" rpy="0 0 0" />
@@ -723,6 +1083,12 @@
         <color rgba="0.2 0.2 0.2 1" />
       </material>
     </visual>
+    <collision name="head_pitch_link_cylinder_0">
+      <origin xyz="0.004730823503652171 0.0 0.005260746109249079" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <cylinder radius="0.09206639842941085" length="0.14419927787780762" />
+      </geometry>
+    </collision>
   </link>
   <joint name="head_pitch_joint" type="fixed">
     <origin xyz="0 0 0.0889" rpy="0 0 0" />
@@ -834,5 +1200,1305 @@
     <parent link="right_wrist_roll_link" />
     <child link="right_hand_center" />
     <origin xyz="-6.720849083809948e-05 -0.0004882786684626394 -0.11120433526415904" rpy="0 0 0" />
+  </joint>
+  <joint name="L_palm_joint" type="fixed">
+    <origin rpy="0 3.14 1.58" xyz="0.00 -0.001 -0.049" />
+    <parent link="left_wrist_roll_link" />
+    <child link="L_palm" />
+  </joint>
+  <link name="L_palm">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/l_palm.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00425607657857528 0.000984907743219104 0.0569954669646572" />
+      <mass value="0.831592534870634" />
+      <inertia ixx="0.00130295787397277" ixy="1.00395530019145e-06" ixz="-2.62221439754335e-05" iyy="0.000759187526142393" iyz="-2.944807671301e-05" izz="0.000650439149629946" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.005" />
+      <geometry>
+        <cylinder length="0.01" radius="0.032" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.057" />
+      <geometry>
+        <box size="0.05 0.09 0.09" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="L_thumb_roll_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/l_thumb_roll.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0238985392698507 -8.492755494241e-05 0.00143588019194235" />
+      <mass value="0.0487218724123021" />
+      <inertia ixx="1.16014813613108e-05" ixy="1.23718071545455e-07" ixz="-3.36389573955908e-07" iyy="6.59632610273689e-06" iyz="2.95789245057348e-07" izz="6.64077304903063e-06" />
+    </inertial>
+    <collision name="L_thumb_roll_link_box_0">
+      <origin xyz="0.013579128542914987 3.725290298461914e-09 0.010610594414174557" rpy="1.5707963267948966 -0.0 1.5707963267948966" />
+      <geometry>
+        <box size="0.040999062031507494 0.062185546055436136 0.04115825812146068" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_roll_joint" type="revolute">
+    <origin rpy="-1.3787926000000001 0 0" xyz="-0.00148 -0.022278 0.04025" />
+    <parent link="L_palm" />
+    <child link="L_thumb_roll_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="0.134" lower="-0.73" upper="0" velocity="2.38" />
+  </joint>
+  <link name="L_thumb_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/l_thumb_abad.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00144112186551029 0.00076971553695547 0.0110530851904386" />
+      <mass value="0.00527730022012764" />
+      <inertia ixx="5.13938107714071e-07" ixy="-2.10724699229959e-09" ixz="1.0099134807133e-08" iyy="3.23678037229255e-07" iyz="6.91586588373309e-08" izz="2.43364847603047e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0.9" xyz="0 0 0" />
+      <geometry>
+        <box size="0.035 0.006 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_abad_joint" type="revolute">
+    <origin rpy="3.1415926 1.0996 3.1415926" xyz="0.029071 0 -0.0033014" />
+    <parent link="L_thumb_roll_link" />
+    <child link="L_thumb_abad_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.317" lower="0" upper="0.94" velocity="2.33" />
+  </joint>
+  <link name="L_thumb_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_mcp.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00248919792890584 -0.000126945293118824 0.0270125022282254" />
+      <mass value="0.0238744814807847" />
+      <inertia ixx="9.14065262802198e-06" ixy="-1.29455343848178e-08" ixz="1.28925259059347e-07" iyy="1.13640026182741e-05" iyz="1.59529488365259e-08" izz="2.86247043401986e-06" />
+    </inertial>
+    <collision>
+      <origin rpy="0 -1.57 0" xyz="0.005 0 0.03" />
+      <geometry>
+        <box size="0.064 0.023 0.03" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_mcp_joint" type="revolute">
+    <origin rpy="0 0.66452 -1.5708" xyz="-0.0016774 -0.0068611 0.022935" />
+    <parent link="L_thumb_abad_link" />
+    <child link="L_thumb_mcp_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.8" lower="-0.85" upper="0" velocity="1.35" />
+  </joint>
+  <link name="L_thumb_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_pip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00238172899603142 -0.000356731641777103 0.0132495532127846" />
+      <mass value="0.015089750823072" />
+      <inertia ixx="1.307652825223e-06" ixy="-2.30842431261842e-09" ixz="1.78861814916216e-07" iyy="1.76921581769367e-06" iyz="-1.30568351519278e-08" izz="8.42951187578533e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 -0.002 0.02" />
+      <geometry>
+        <cylinder length="0.02" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0067768 0 0.05582" />
+    <parent link="L_thumb_mcp_link" />
+    <child link="L_thumb_pip_link" />
+    <axis xyz="0  -1 0" />
+    <limit effort="0.92" lower="-1.29" upper="0" velocity="1.87" />
+  </joint>
+  <link name="L_thumb_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_dip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00103086462486497 4.35579912222428e-07 0.0111718009868479" />
+      <mass value="0.0166245749238282" />
+      <inertia ixx="1.55367650349561e-06" ixy="6.28496740782693e-11" ixz="-2.68802086888384e-07" iyy="1.43025255900936e-06" iyz="3.60153740856451e-11" izz="8.87371852515915e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.015" />
+      <geometry>
+        <cylinder length="0.03" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" -0.0025791  0 0.034516" />
+    <parent link="L_thumb_pip_link" />
+    <child link="L_thumb_dip_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.92" lower="-1.31" upper="0" velocity="1.9" />
+  </joint>
+  <link name="L_thumb_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_thumb_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01107 0 0.02778" />
+    <parent link="L_thumb_dip_link" />
+    <child link="L_thumb_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="L_index_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_abad.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00904689264775126 -2.37541539321873e-06 0.00296439795566343" />
+      <mass value="0.00769184155607912" />
+      <inertia ixx="3.12253146637431e-07" ixy="8.36823610669688e-11" ixz="3.47679984094986e-08" iyy="1.96445680122249e-07" iyz="6.80359270914641e-11" izz="2.98132181313685e-07" />
+    </inertial>
+    <collision name="L_index_abad_link_box_0">
+      <origin xyz="0.009619428194127977 -4.190951585769653e-09 0.003601294127292931" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.015900335179641845 0.018998958773911 0.015456703862175345" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_index_abad_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0134 -0.030778 0.11936" />
+    <parent link="L_palm" />
+    <child link="L_index_abad_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="1.001" lower="-0.26" upper="0.26" velocity="2.16" />
+  </joint>
+  <link name="L_index_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_mcp.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00199825952289442 -2.64457175807586e-05 0.0201667389503313" />
+      <mass value="0.00942126624293676" />
+      <inertia ixx="1.22975708566729e-06" ixy="2.28040809755226e-10" ixz="-5.99595621936577e-08" iyy="1.34371119474184e-06" iyz="-7.2313211083901e-10" izz="3.61297485727319e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.016" />
+      <geometry>
+        <cylinder length="0.038" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_index_mcp_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.01357 0 0" />
+    <parent link="L_index_abad_link" />
+    <child link="L_index_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.42" lower="0" upper="1.33" velocity="2.22" />
+  </joint>
+  <link name="L_index_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_pip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000915277748706721 -2.44819798689566e-05 0.0134565632396798" />
+      <mass value="0.00438956668936868" />
+      <inertia ixx="3.90192390925837e-07" ixy="-1.18711764286958e-10" ixz="3.07110243989117e-08" iyy="3.39842342249121e-07" iyz="4.52776521802555e-11" izz="2.34598309279793e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.001 0 0.015" />
+      <geometry>
+        <cylinder length="0.022" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_index_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0044047 0 0.039781" />
+    <parent link="L_index_mcp_link" />
+    <child link="L_index_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.216" lower="0" upper="1.48" velocity="2.49" />
+  </joint>
+  <link name="L_index_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00788115735969092 -1.62686611911711e-05 0.00734085069241115" />
+      <mass value="0.00919575167024177" />
+      <inertia ixx="6.1598320028546e-07" ixy="4.87748545899042e-10" ixz="-1.46101909693797e-07" iyy="6.32146337383652e-07" iyz="-1.82637544331928e-09" izz="3.00226734906959e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.013" />
+      <geometry>
+        <cylinder length="0.02" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_index_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.0058514  0 0.026478" />
+    <parent link="L_index_pip_link" />
+    <child link="L_index_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.216" lower="0" upper="1.31" velocity="2.85" />
+  </joint>
+  <link name="L_index_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_index_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="L_index_dip_link" />
+    <child link="L_index_tip" />
+  </joint>
+  <link name="L_middle_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_abad.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00886137366293534 -3.75661207696609e-09 0.00266832955690114" />
+      <mass value="0.00637102949978218" />
+      <inertia ixx="2.41627954466445e-07" ixy="2.52962153485538e-12" ixz="2.44913153285072e-08" iyy="1.58576266250976e-07" iyz="5.93368216213693e-13" izz="2.58849212903404e-07" />
+    </inertial>
+    <collision name="L_middle_abad_link_cylinder_0">
+      <origin xyz="0.009296456431871138 8.847564458847046e-09 0.0036651025293394923" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.010624258259707458" length="0.015330212095752358" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_middle_abad_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0134 -0.0066607 0.11936" />
+    <parent link="L_palm" />
+    <child link="L_middle_abad_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="1.031" lower="-0.26" upper="0.26" velocity="2.16" />
+  </joint>
+  <link name="L_middle_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_mcp.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00165476847526829 -2.20979993567627e-06 0.0225332391057417" />
+      <mass value="0.0105445601098368" />
+      <inertia ixx="1.73042184201086e-06" ixy="2.04331701697306e-10" ixz="-5.90285580204209e-08" iyy="1.85661332749592e-06" iyz="-1.32105746258306e-09" izz="4.2136357029816e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.016" />
+      <geometry>
+        <cylinder length="0.04" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_middle_mcp_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.01337 0 0" />
+    <parent link="L_middle_abad_link" />
+    <child link="L_middle_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.413" lower="0" upper="1.33" velocity="2.22" />
+  </joint>
+  <link name="L_middle_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_pip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000830746222013005 4.34482098339573e-05 0.0161492835641447" />
+      <mass value="0.00495728561619528" />
+      <inertia ixx="5.48440909443586e-07" ixy="6.39554522791554e-11" ixz="4.33803111439142e-08" iyy="4.91459567907306e-07" iyz="-6.02486738632266e-11" izz="2.62953076584762e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.001 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_middle_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0040396 0 0.044837" />
+    <parent link="L_middle_mcp_link" />
+    <child link="L_middle_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.136" lower="0" upper="1.71" velocity="2.16" />
+  </joint>
+  <link name="L_middle_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00783321210053064 0.000103726115592395 0.00739196062285884" />
+      <mass value="0.00919573396837047" />
+      <inertia ixx="6.17868791705364e-07" ixy="4.75945812309197e-10" ixz="-1.44033848644933e-07" iyy="6.32143569461496e-07" iyz="-1.83019369609838e-09" izz="2.98337914527375e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_middle_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.005529  0 0.031336" />
+    <parent link="L_middle_pip_link" />
+    <child link="L_middle_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.136" lower="0" upper="1.31" velocity="2.48" />
+  </joint>
+  <link name="L_middle_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_middle_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="L_middle_dip_link" />
+    <child link="L_middle_tip" />
+  </joint>
+  <joint name="L_ring_mcp_joint" type="revolute">
+    <origin rpy="0.0 0.0 0.0" xyz="0.0001598 0.013518 0.11972" />
+    <parent link="L_palm" />
+    <child link="L_ring_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.38" velocity="2.54" />
+  </joint>
+  <link name="L_ring_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_mcp.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00161802170047008 2.08220096852268e-05 0.0212342177709951" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="5.43923252152409e-07" ixy="8.48896522637981e-11" ixz="2.4689478865027e-08" iyy="5.41640127982143e-07" iyz="2.5218290048469e-10" izz="1.76501748993068e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.014" />
+      <geometry>
+        <cylinder length="0.035" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="L_ring_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_pip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000940340714750308 1.66667751162405e-05 0.0134216382614548" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="2.25767846748625e-07" ixy="-4.61360531413437e-12" ixz="2.32301202429608e-09" iyy="1.61875511170868e-07" iyz="9.05860342855209e-12" izz="1.17700137222491e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.0015 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_ring_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0039371 0 0.03983" />
+    <parent link="L_ring_mcp_link" />
+    <child link="L_ring_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.57" velocity="2.29" />
+  </joint>
+  <link name="L_ring_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.0077943915041099 -2.51275100347781e-05 0.00743291370409035" />
+      <mass value="0.00919575186910556" />
+      <inertia ixx="6.19370856718727e-07" ixy="4.661874813998e-10" ixz="-1.42352843928183e-07" iyy="6.32145627609476e-07" iyz="-1.83190371320788e-09" izz="2.9683840460863e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_ring_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.006162  0 0.026407" />
+    <parent link="L_ring_pip_link" />
+    <child link="L_ring_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.31" velocity="2.62" />
+  </joint>
+  <link name="L_ring_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_ring_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="L_ring_dip_link" />
+    <child link="L_ring_tip" />
+  </joint>
+  <joint name="L_pinky_mcp_joint" type="revolute">
+    <origin rpy="0.0 0.0 0.0" xyz="0.0001598 0.033576 0.11272" />
+    <parent link="L_palm" />
+    <child link="L_pinky_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.38" velocity="2.54" />
+  </joint>
+  <link name="L_pinky_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_mcp.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00161802170047008 2.08220096852268e-05 0.0212342177709951" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="5.43923252152409e-07" ixy="8.48896522637981e-11" ixz="2.4689478865027e-08" iyy="5.41640127982143e-07" iyz="2.5218290048469e-10" izz="1.76501748993068e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.014" />
+      <geometry>
+        <cylinder length="0.035" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="L_pinky_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_pip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000940340714750308 1.66667751162405e-05 0.0134216382614548" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="2.25767846748625e-07" ixy="-4.61360531413437e-12" ixz="2.32301202429608e-09" iyy="1.61875511170868e-07" iyz="9.05860342855209e-12" izz="1.17700137222491e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.0015 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_pinky_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0039371 0 0.03983" />
+    <parent link="L_pinky_mcp_link" />
+    <child link="L_pinky_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.57" velocity="2.29" />
+  </joint>
+  <link name="L_pinky_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="L_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.0077943915041099 -2.51275100347781e-05 0.00743291370409035" />
+      <mass value="0.00919575186910556" />
+      <inertia ixx="6.19370856718727e-07" ixy="4.661874813998e-10" ixz="-1.42352843928183e-07" iyy="6.32145627609476e-07" iyz="-1.83190371320788e-09" izz="2.9683840460863e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_pinky_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.006162  0 0.026407" />
+    <parent link="L_pinky_pip_link" />
+    <child link="L_pinky_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.31" velocity="2.62" />
+  </joint>
+  <link name="L_pinky_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="L_pinky_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="L_pinky_dip_link" />
+    <child link="L_pinky_tip" />
+  </joint>
+  <joint name="R_palm_joint" type="fixed">
+    <origin rpy="0.0 3.14 -1.58" xyz="0.00 0.001 -0.049" />
+    <parent link="right_wrist_roll_link" />
+    <child link="R_palm" />
+  </joint>
+  <link name="R_palm">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/r_palm.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00425607657857528 -0.000984907743219104 0.0569954669646572" />
+      <mass value="0.831592534870634" />
+      <inertia ixx="0.00130295787397277" ixy="-1.00395530019145e-06" ixz="-2.62221439754335e-05" iyy="0.000759187526142393" iyz="2.944807671301e-05" izz="0.000650439149629946" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.005" />
+      <geometry>
+        <cylinder length="0.01" radius="0.032" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.057" />
+      <geometry>
+        <box size="0.05 0.09 0.09" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="R_thumb_roll_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/r_thumb_roll.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0238985392698507 8.492755494241e-05 0.00143588019194235" />
+      <mass value="0.0487218724123021" />
+      <inertia ixx="1.16014813613108e-05" ixy="-1.23718071545455e-07" ixz="-3.36389573955908e-07" iyy="6.59632610273689e-06" iyz="-2.95789245057348e-07" izz="6.64077304903063e-06" />
+    </inertial>
+    <collision name="R_thumb_roll_link_box_0">
+      <origin xyz="0.013579128542914987 3.725290298461914e-09 -0.010614129714667797" rpy="-1.5707963267948966 -1.5707963267948966 0.0" />
+      <geometry>
+        <box size="0.062178475454449655 0.04115825812146068 0.040999062031507494" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_roll_joint" type="revolute">
+    <origin rpy="-1.7628 0 0" xyz="-0.00148 0.022278 0.04025" />
+    <parent link="R_palm" />
+    <child link="R_thumb_roll_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="0.134" lower="0" upper="0.73" velocity="2.38" />
+  </joint>
+  <link name="R_thumb_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/r_thumb_abad.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00144112186551029 -0.00076971553695547 0.0110530851904386" />
+      <mass value="0.00527730022012764" />
+      <inertia ixx="5.13938107714071e-07" ixy="2.10724699229959e-09" ixz="1.0099134807133e-08" iyy="3.23678037229255e-07" iyz="-6.91586588373309e-08" izz="2.43364847603047e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0.9" xyz="0 0 0" />
+      <geometry>
+        <box size="0.035 0.006 0.02" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_abad_joint" type="revolute">
+    <origin rpy="0 1.0996 0" xyz="0.029071 0 0.0033014" />
+    <parent link="R_thumb_roll_link" />
+    <child link="R_thumb_abad_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.317" lower="-0.94" upper="0" velocity="2.33" />
+  </joint>
+  <link name="R_thumb_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_mcp.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00248919792890584 0.000126945293118824 0.0270125022282254" />
+      <mass value="0.0238744814807847" />
+      <inertia ixx="9.14065262802198e-06" ixy="1.29455343848178e-08" ixz="1.28925259059347e-07" iyy="1.13640026182741e-05" iyz="-1.59529488365259e-08" izz="2.86247043401986e-06" />
+    </inertial>
+    <collision>
+      <origin rpy="0 1.57 0" xyz="0.005 0 0.03" />
+      <geometry>
+        <box size="0.064 0.023 0.03" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_mcp_joint" type="revolute">
+    <origin rpy="0 0.66452 -1.5708" xyz="0.0016774 -0.0068611 0.022935" />
+    <parent link="R_thumb_abad_link" />
+    <child link="R_thumb_mcp_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.8" lower="-0.85" upper="0" velocity="1.35" />
+  </joint>
+  <link name="R_thumb_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_pip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00238172899603142 0.000356731641777103 0.0132495532127846" />
+      <mass value="0.015089750823072" />
+      <inertia ixx="1.307652825223e-06" ixy="2.30842431261842e-09" ixz="1.78861814916216e-07" iyy="1.76921581769367e-06" iyz="1.30568351519278e-08" izz="8.42951187578533e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0.002 0.02" />
+      <geometry>
+        <cylinder length="0.02" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0067768 0 0.05582" />
+    <parent link="R_thumb_mcp_link" />
+    <child link="R_thumb_pip_link" />
+    <axis xyz="0  -1 0" />
+    <limit effort="0.92" lower="-1.29" upper="0" velocity="1.87" />
+  </joint>
+  <link name="R_thumb_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/thumb_dip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00103086462486497 -4.35579912222428e-07 0.0111718009868479" />
+      <mass value="0.0166245749238282" />
+      <inertia ixx="1.55367650349561e-06" ixy="-6.28496740782693e-11" ixz="-2.68802086888384e-07" iyy="1.43025255900936e-06" iyz="-3.60153740856451e-11" izz="8.87371852515915e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.015" />
+      <geometry>
+        <cylinder length="0.03" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" -0.0025791  0 0.034516" />
+    <parent link="R_thumb_pip_link" />
+    <child link="R_thumb_dip_link" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0.92" lower="-1.31" upper="0" velocity="1.9" />
+  </joint>
+  <link name="R_thumb_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_thumb_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01107 0 0.02778" />
+    <parent link="R_thumb_dip_link" />
+    <child link="R_thumb_tip" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="R_index_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_abad.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00904689264775126 2.37541539321873e-06 0.00296439795566343" />
+      <mass value="0.00769184155607912" />
+      <inertia ixx="3.12253146637431e-07" ixy="-8.36823610669688e-11" ixz="3.47679984094986e-08" iyy="1.96445680122249e-07" iyz="-6.80359270914641e-11" izz="2.98132181313685e-07" />
+    </inertial>
+    <collision name="R_index_abad_link_box_0">
+      <origin xyz="0.009619428194127977 -4.190951585769653e-09 0.003601294127292931" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <box size="0.015900335179641845 0.018998958773911 0.015456703862175345" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_index_abad_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0134 0.030778 0.11936" />
+    <parent link="R_palm" />
+    <child link="R_index_abad_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="1.001" lower="-0.26" upper="0.26" velocity="2.16" />
+  </joint>
+  <link name="R_index_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_mcp.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00199825952289442 2.64457175807586e-05 0.0201667389503313" />
+      <mass value="0.00942126624293676" />
+      <inertia ixx="1.22975708566729e-06" ixy="-2.28040809755226e-10" ixz="-5.99595621936577e-08" iyy="1.34371119474184e-06" iyz="7.2313211083901e-10" izz="3.61297485727319e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.016" />
+      <geometry>
+        <cylinder length="0.038" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_index_mcp_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.01357 0 0" />
+    <parent link="R_index_abad_link" />
+    <child link="R_index_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.42" lower="0" upper="1.33" velocity="2.22" />
+  </joint>
+  <link name="R_index_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/index_pip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000915277748706721 2.44819798689566e-05 0.0134565632396798" />
+      <mass value="0.00438956668936868" />
+      <inertia ixx="3.90192390925837e-07" ixy="1.18711764286958e-10" ixz="3.07110243989117e-08" iyy="3.39842342249121e-07" iyz="-4.52776521802555e-11" izz="2.34598309279793e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.001 0 0.015" />
+      <geometry>
+        <cylinder length="0.022" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_index_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0044047 0 0.039781" />
+    <parent link="R_index_mcp_link" />
+    <child link="R_index_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.216" lower="0" upper="1.48" velocity="2.49" />
+  </joint>
+  <link name="R_index_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00788115735969092 1.62686611911711e-05 0.00734085069241115" />
+      <mass value="0.00919575167024177" />
+      <inertia ixx="6.1598320028546e-07" ixy="-4.87748545899042e-10" ixz="-1.46101909693797e-07" iyy="6.32146337383652e-07" iyz="1.82637544331928e-09" izz="3.00226734906959e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.013" />
+      <geometry>
+        <cylinder length="0.02" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_index_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.0058514  0 0.026478" />
+    <parent link="R_index_pip_link" />
+    <child link="R_index_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.216" lower="0" upper="1.31" velocity="2.85" />
+  </joint>
+  <link name="R_index_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_index_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="R_index_dip_link" />
+    <child link="R_index_tip" />
+  </joint>
+  <link name="R_middle_abad_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_abad.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.00886137366293534 3.75661207696609e-09 0.00266832955690114" />
+      <mass value="0.00637102949978218" />
+      <inertia ixx="2.41627954466445e-07" ixy="-2.52962153485538e-12" ixz="2.44913153285072e-08" iyy="1.58576266250976e-07" iyz="-5.93368216213693e-13" izz="2.58849212903404e-07" />
+    </inertial>
+    <collision name="R_middle_abad_link_cylinder_0">
+      <origin xyz="0.009296456431871138 8.847564458847046e-09 0.0036651025293394923" rpy="0.0 -0.0 0.0" />
+      <geometry>
+        <cylinder radius="0.010624258259707458" length="0.015330212095752358" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_middle_abad_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0134 0.0066607 0.11936" />
+    <parent link="R_palm" />
+    <child link="R_middle_abad_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="1.031" lower="-0.26" upper="0.26" velocity="2.16" />
+  </joint>
+  <link name="R_middle_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_mcp.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00165476847526829 2.20979993567627e-06 0.0225332391057417" />
+      <mass value="0.0105445601098368" />
+      <inertia ixx="1.73042184201086e-06" ixy="-2.04331701697306e-10" ixz="-5.90285580204209e-08" iyy="1.85661332749592e-06" iyz="1.32105746258306e-09" izz="4.2136357029816e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.016" />
+      <geometry>
+        <cylinder length="0.04" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_middle_mcp_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="0.01337 0 0" />
+    <parent link="R_middle_abad_link" />
+    <child link="R_middle_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.413" lower="0" upper="1.33" velocity="2.22" />
+  </joint>
+  <link name="R_middle_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/middle_pip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000830746222013005 -4.34482098339573e-05 0.0161492835641447" />
+      <mass value="0.00495728561619528" />
+      <inertia ixx="5.48440909443586e-07" ixy="-6.39554522791554e-11" ixz="4.33803111439142e-08" iyy="4.91459567907306e-07" iyz="6.02486738632266e-11" izz="2.62953076584762e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.001 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_middle_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0040396 0 0.044837" />
+    <parent link="R_middle_mcp_link" />
+    <child link="R_middle_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.136" lower="0" upper="1.71" velocity="2.16" />
+  </joint>
+  <link name="R_middle_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00783321210053064 -0.000103726115592395 0.00739196062285884" />
+      <mass value="0.00919573396837047" />
+      <inertia ixx="6.17868791705364e-07" ixy="-4.75945812309197e-10" ixz="-1.44033848644933e-07" iyy="6.32143569461496e-07" iyz="1.83019369609838e-09" izz="2.98337914527375e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_middle_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.005529  0 0.031336" />
+    <parent link="R_middle_pip_link" />
+    <child link="R_middle_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.136" lower="0" upper="1.31" velocity="2.48" />
+  </joint>
+  <link name="R_middle_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_middle_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="R_middle_dip_link" />
+    <child link="R_middle_tip" />
+  </joint>
+  <joint name="R_ring_mcp_joint" type="revolute">
+    <origin rpy="0.0 0.0 0.0" xyz="0.0001598 -0.013518 0.11972" />
+    <parent link="R_palm" />
+    <child link="R_ring_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.38" velocity="2.54" />
+  </joint>
+  <link name="R_ring_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_mcp.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00161802170047008 -2.08220096852268e-05 0.0212342177709951" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="5.43923252152409e-07" ixy="-8.48896522637981e-11" ixz="2.4689478865027e-08" iyy="5.41640127982143e-07" iyz="-2.5218290048469e-10" izz="1.76501748993068e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.014" />
+      <geometry>
+        <cylinder length="0.035" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="R_ring_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_pip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000940340714750308 -1.66667751162405e-05 0.0134216382614548" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="2.25767846748625e-07" ixy="4.61360531413437e-12" ixz="2.32301202429608e-09" iyy="1.61875511170868e-07" iyz="-9.05860342855209e-12" izz="1.17700137222491e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.0015 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_ring_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0039371 0 0.03983" />
+    <parent link="R_ring_mcp_link" />
+    <child link="R_ring_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.57" velocity="2.29" />
+  </joint>
+  <link name="R_ring_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.0077943915041099 2.51275100347781e-05 0.00743291370409035" />
+      <mass value="0.00919575186910556" />
+      <inertia ixx="6.19370856718727e-07" ixy="-4.661874813998e-10" ixz="-1.42352843928183e-07" iyy="6.32145627609476e-07" iyz="1.83190371320788e-09" izz="2.9683840460863e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_ring_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.006162  0 0.026407" />
+    <parent link="R_ring_pip_link" />
+    <child link="R_ring_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.31" velocity="2.62" />
+  </joint>
+  <link name="R_ring_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_ring_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="R_ring_dip_link" />
+    <child link="R_ring_tip" />
+  </joint>
+  <joint name="R_pinky_mcp_joint" type="revolute">
+    <origin rpy="0.0 0.0 0.0" xyz="0.0001598 -0.033576 0.11272" />
+    <parent link="R_palm" />
+    <child link="R_pinky_mcp_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.38" velocity="2.54" />
+  </joint>
+  <link name="R_pinky_mcp_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_mcp.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00161802170047008 -2.08220096852268e-05 0.0212342177709951" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="5.43923252152409e-07" ixy="-8.48896522637981e-11" ixz="2.4689478865027e-08" iyy="5.41640127982143e-07" iyz="-2.5218290048469e-10" izz="1.76501748993068e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.002 0 0.014" />
+      <geometry>
+        <cylinder length="0.035" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="R_pinky_pip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/ring_pip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.000940340714750308 -1.66667751162405e-05 0.0134216382614548" />
+      <mass value="0.0047795328266326" />
+      <inertia ixx="2.25767846748625e-07" ixy="4.61360531413437e-12" ixz="2.32301202429608e-09" iyy="1.61875511170868e-07" iyz="-9.05860342855209e-12" izz="1.17700137222491e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.0015 0 0.014" />
+      <geometry>
+        <cylinder length="0.028" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_pinky_pip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.0039371 0 0.03983" />
+    <parent link="R_pinky_mcp_link" />
+    <child link="R_pinky_pip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.57" velocity="2.29" />
+  </joint>
+  <link name="R_pinky_dip_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <mesh filename="../../omnihand_pro/meshes/finger_dip.STL" />
+      </geometry>
+      <material name="R_black">
+        <color rgba="0.5 0.5 0.5 1.0" />
+      </material>
+    </visual>
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.0077943915041099 2.51275100347781e-05 0.00743291370409035" />
+      <mass value="0.00919575186910556" />
+      <inertia ixx="6.19370856718727e-07" ixy="-4.661874813998e-10" ixz="-1.42352843928183e-07" iyy="6.32145627609476e-07" iyz="1.83190371320788e-09" izz="2.9683840460863e-07" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="-0.006 0 0.014" />
+      <geometry>
+        <cylinder length="0.018" radius="0.01" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_pinky_dip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0.006162  0 0.026407" />
+    <parent link="R_pinky_pip_link" />
+    <child link="R_pinky_dip_link" />
+    <axis xyz="0 1 0" />
+    <limit effort="0.444" lower="0" upper="1.31" velocity="2.62" />
+  </joint>
+  <link name="R_pinky_tip">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="R_pinky_tip_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="-0.01465 0 0.02533" />
+    <parent link="R_pinky_dip_link" />
+    <child link="R_pinky_tip" />
   </joint>
 </robot>

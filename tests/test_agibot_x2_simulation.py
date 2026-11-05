@@ -58,6 +58,40 @@ class X2SimulationTests(unittest.TestCase):
         self.addCleanup(controller.xr_client.close)
         return controller
 
+    def test_default_control_frequency_is_50_hz(self):
+        c = self.make_controller()
+        self.assertEqual(c.control_frequency, 50.0)
+        self.assertAlmostEqual(c.dt, 0.02)
+        self.assertAlmostEqual(c.solver.dt, c.dt)
+        self.assertEqual(c.physics_substeps, 20)
+        c.step_control()
+        self.assertAlmostEqual(c.mj_data.time, c.dt, places=12)
+
+    def test_control_frequency_preserves_exact_physics_periods(self):
+        for frequency in (25.0, 60.0, 100.0, 2000.0):
+            with self.subTest(frequency=frequency):
+                c = self.make_controller(control_frequency=frequency)
+                self.assertAlmostEqual(c.dt, 1 / frequency)
+                self.assertAlmostEqual(c.solver.dt, c.dt)
+                self.assertGreaterEqual(c.physics_substeps, 1)
+                self.assertLessEqual(c.mj_model.opt.timestep, 0.001)
+                self.assertAlmostEqual(c.physics_substeps * c.mj_model.opt.timestep, c.dt, places=12)
+                for _ in range(5):
+                    c.step_control()
+                self.assertAlmostEqual(c.mj_data.time, 5 / frequency, places=12)
+
+    def test_invalid_control_frequency_rejected_before_xr_connection(self):
+        for frequency in (0, -50, np.nan, np.inf, -np.inf, 1e-320):
+            with (
+                self.subTest(frequency=frequency),
+                patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+            ):
+                with self.assertRaisesRegex(ValueError, "control_frequency"):
+                    AgibotX2TeleopController(
+                        str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), control_frequency=frequency
+                    )
+                xr.assert_not_called()
+
     def test_model_structure_and_frame_alignment(self):
         m, robot = self.model, self.robot
         self.assertEqual((m.nq, m.nv, m.nu), (14, 14, 14))
@@ -173,7 +207,7 @@ class X2SimulationTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(c.mj_data.qpos)))
         self.assertLess(np.max(np.abs(c.mj_data.qpos - initial)), 0.025)
         np.testing.assert_array_equal(c.mj_data.ctrl, initial)
-        self.assertAlmostEqual(c.mj_data.time, 3.0, places=8)
+        self.assertAlmostEqual(c.mj_data.time, 300 * c.dt, places=8)
         command = initial.copy()
         for side in ("left", "right"):
             i = c.mj_model.joint(f"{side}_elbow_joint").qposadr[0]

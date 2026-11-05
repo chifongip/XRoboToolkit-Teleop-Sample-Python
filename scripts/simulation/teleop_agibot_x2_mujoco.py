@@ -17,7 +17,10 @@ def main(
     visualize_placo: bool = False,
     arm_velocity_limit: float = 8.0,
     hand_velocity_limit: float = 2.0,
+    collision_margin: float = 0.02,
+    collision_trigger: float = 0.08,
     with_omnihand: bool = False,
+    control_frequency: float = 50.0,
 ):
     """Control each hand center in the VR tracking world frame while gripping; release to hold.
 
@@ -28,7 +31,10 @@ def main(
         visualize_placo: Also open the Placo visualization in a browser.
         arm_velocity_limit: Arm IK joint speed cap in rad/s, bounded by each joint's URDF limit.
         hand_velocity_limit: Actuated finger target speed cap in rad/s, bounded by each joint's URDF limit.
+        collision_margin: Minimum clearance between IK collision shapes, in meters.
+        collision_trigger: Distance at which IK collision constraints activate, in meters; greater than margin.
         with_omnihand: Use the bundled X2 + Omnihand Pro scene; triggers open/close hands.
+        control_frequency: Target control frequency in Hz; default 50. Physics steps fit each control period.
     """
     if not math.isfinite(scale_factor) or scale_factor <= 0:
         raise ValueError("scale_factor must be finite and positive")
@@ -45,8 +51,12 @@ def main(
         visualize_placo,
         arm_velocity_limit=arm_velocity_limit,
         hand_velocity_limit=hand_velocity_limit,
+        collision_margin=collision_margin,
+        collision_trigger=collision_trigger,
+        control_frequency=control_frequency,
     )
     print("X2 simulation: VR tracking world-frame controllers -> left/right hand centers (position and orientation)")
+    print(f"Control frequency target: {control_frequency:g} Hz")
     print("Hold the corresponding grip to move; release to hold. Close the viewer or press Ctrl-C to exit.")
     if with_omnihand:
         print("Left/right triggers close the corresponding Omnihand Pro hand; release to open (contacts disabled).")

@@ -37,14 +37,20 @@ at -0.6/+0.6 rad on the left and +0.6/-0.6 rad on the right. The four finger
 targets are unchanged. Collision-mesh regression checks sample both hands
 during opening, closing, and the partial-trigger reversal sequence found in
 review, at hand speed caps of 0.5, 2.0, and 8.0 rad/s.
-This is a preset pose with sampled clearance checks, not runtime collision
-avoidance or a grasp controller.
+The combined X2 IK model now includes these URDF joint chains, with per-link
+boxes, cylinders, and spheres following measured finger motion. The generated
+model preserves the supplied primitive shapes and their local transforms. Trigger proposals are
+checked against the body, opposite arm, and opposite hand. Internal same-hand
+pairs remain excluded; the preset thumb clearance checks do not constitute
+runtime finger-to-finger avoidance or a grasp controller.
 
 The short v1.4 X2 wrists and existing wrist-to-palm transforms remain in use.
 This hand-only package does not supply an X2 adapter transform; the current
 mount is an initial simulation assembly, not a physical mounting specification.
 The source URDF approximates coupling linearly; the simulation uses MJCF
-nonlinear coupling.
+nonlinear coupling. The generated collision/IK model removes mimic tags and
+observes all actual finger joint positions, so passive fingers follow measured
+nonlinear coupling rather than the URDF approximation.
 
 Regenerate: `python scripts/simulation/build_x2_omnihand_assets.py`.
 Launch: `python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand`.
