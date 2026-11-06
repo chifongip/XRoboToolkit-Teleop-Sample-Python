@@ -1,27 +1,29 @@
 """Run the fixed-body Agibot X2 dual-arm VR simulation."""
 
-import os
 import math
+import os
 from pathlib import Path
 
 import tyro
-
-from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
+from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
+from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import (
+    AgibotX2TeleopController,
+)
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
 
 
 def main(
     xml_path: str = os.path.join(ASSET_PATH, "agibot/x2/scene.xml"),
     robot_urdf_path: str = os.path.join(ASSET_PATH, "agibot/x2/x2_fixed.urdf"),
-    scale_factor: float = 1.0,
+    scale_factor: float = DEFAULTS.scale_factor,
     visualize_placo: bool = False,
-    arm_velocity_limit: float = 8.0,
-    hand_velocity_limit: float = 2.0,
-    collision_margin: float = 0.02,
-    collision_trigger: float = 0.08,
+    arm_velocity_limit: float = DEFAULTS.arm_velocity_limit,
+    hand_velocity_limit: float = DEFAULTS.hand_velocity_limit,
+    collision_margin: float = DEFAULTS.collision_margin,
+    collision_trigger: float = DEFAULTS.collision_trigger,
     with_omnihand: bool = False,
-    control_frequency: float = 50.0,
-    return_velocity_limit: float = 1.0,
+    control_frequency: float = DEFAULTS.control_frequency,
+    return_velocity_limit: float = DEFAULTS.return_velocity_limit,
 ):
     """Hold a grip to move its hand center; release both grips to reset the control heading.
 

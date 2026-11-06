@@ -35,7 +35,7 @@ X2 Python dependencies; PC Service remains a separate installation. The X2-only
 pip installation does not create or switch Conda environments.
 
 This installs the shared dependencies (NumPy, Meshcat, Placo, and the XRoboToolkit
-SDK) plus MuJoCo and Tyro, including their transitive dependencies. It supports
+SDK) plus MuJoCo, Tyro, and PyZMQ, including their transitive dependencies. It supports
 both the arm-only and `--with-omnihand` simulated X2 examples. It does not install
 other robot SDKs, Torch, camera packages, or dexterous-hand retargeting packages.
 The SDK is installed through pip; no SDK source checkout or setup script is needed.
@@ -59,6 +59,54 @@ A plain `pip install -e .` now installs only shared dependencies. Use
 set, or `".[all,dev]"` to include development tools. Other hardware examples may
 still require external SDKs and system setup. The legacy setup scripts request
 the `all` extra and are not needed for X2-only installation.
+
+### RoboJuDo-Plus X2 bridge
+
+The `x2` extra also provides a headless bridge using live measured robot state:
+
+```bash
+python -m xrobotoolkit_teleop.integrations.robojudo_x2 --help
+python -m xrobotoolkit_teleop.integrations.robojudo_x2
+```
+
+Run it in this environment alongside RoboJuDo-Plus's `x2_xrobotoolkit` simulation
+preset or `x2_xrobotoolkit_real` AimDK preset in the robot environment. The bridge
+requires no RoboJuDo Python imports. It binds arm commands on port 8559 and
+subscribes to measured-state feedback on port 8571 by default; both endpoints
+are configurable. Start PC Service and headset streaming before enabling tracking.
+
+The bridge observes all 31 robot joints and commands only the 14 arm joints.
+Hand targets follow the measured torso, while grip release holds the last
+commanded targets. It uses the same default settings and collision helpers as the
+standalone demo: arm cap 8 rad/s, return cap 1 rad/s, 50 Hz, scale 1.0, collision
+margin 0.02 m, activation distance 0.08 m, and XR timeout 0.25 s. URDF/deployment
+limits remain authoritative; no additional receiver EMA is used.
+
+Tracking holds on stale input and automatically rebases controller references
+when fresh data returns, discarding motion made during a transient hold. Startup,
+explicit mode changes, and a restarted bridge require grip release before engagement.
+IK starts from acknowledged arm targets; measured servo lag cannot pin an ungripped
+arm outside its command speed window. The posture preference remains at the configured
+default pose, so repeated near-straight-arm movements do not accumulate redundant-joint drift.
+Nonlinear collision rejection tries bounded
+shorter steps, each checked against both measured and acknowledged configurations.
+Explicit teleop disable requests a checked return to defaults,
+which can run without XR tracking. If the bridge is offline the robot retains
+that request and holds until it recovers. XR `Y` held also requests a return;
+loss of XR freshness ends that button-driven return. Walking, runtime modes,
+and recording controls remain in RoboJuDo. OmniHand integration is deferred.
+
+The reusable `common.x2_arm_retargeter.X2ArmRetargeter` accepts measured joint
+positions, acknowledged arm targets, defaults, limits, intent, and optional
+`X2XRFrame` input. It returns a complete float32 arm proposal or `None` to hold.
+It restores body DOFs in the bundled model for observation, masks them during
+IK, and checks the final measured-to-target and previous-to-target paths without
+advancing physics. Robot-owned session, generation, feedback, and command IDs
+prevent old proposals from executing after mode changes or restarts.
+
+See the [RoboJuDo-Plus guide](https://github.com/chifongip/RoboJuDo-Plus/blob/main/docs/xrobotoolkit_teleop.md)
+for two-terminal setup, protocol details, and synthetic two-process validation.
+Real hardware acceptance is separate from automated MuJoCo checks.
 
 ### Full installation and hardware setup
 

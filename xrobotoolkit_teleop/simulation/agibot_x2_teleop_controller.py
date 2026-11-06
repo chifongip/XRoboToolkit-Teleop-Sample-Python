@@ -3,8 +3,8 @@
 import json
 import math
 import time
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import mujoco
 import numpy as np
@@ -13,34 +13,36 @@ from meshcat import transformations as tf
 from mujoco import viewer as mj_viewer
 from numpy.polynomial.polynomial import polyval
 
+from xrobotoolkit_teleop.common.x2_collision import X2CollisionMixin
+from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
 from xrobotoolkit_teleop.simulation.agibot_x2_hand_config import HAND_CLOSED
-from xrobotoolkit_teleop.simulation.mujoco_teleop_controller import MujocoTeleopController
+from xrobotoolkit_teleop.simulation.mujoco_teleop_controller import (
+    MujocoTeleopController,
+)
 from xrobotoolkit_teleop.utils.collision_checks import CollisionChecker
 from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, apply_delta_pose
 from xrobotoolkit_teleop.utils.mujoco_utils import calc_placo_q_from_mujoco_qpos
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
 
 
-class AgibotX2TeleopController(MujocoTeleopController):
+class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
     """Two controller poses drive hand-center frames; released grips hold commands."""
 
-    XR_TRACKING_TIMEOUT_S = 0.25
-    COLLISION_CHECK_STEP_RAD = 0.02
-    MAX_COLLISION_SAMPLES = 4096
+    XR_TRACKING_TIMEOUT_S = DEFAULTS.tracking_timeout_s
     HAND_CLOSED = HAND_CLOSED
 
     def __init__(
         self,
         xml_path,
         robot_urdf_path,
-        scale_factor=1.0,
+        scale_factor=DEFAULTS.scale_factor,
         visualize_placo=False,
-        arm_velocity_limit=8.0,
-        hand_velocity_limit=2.0,
-        collision_margin=0.02,
-        collision_trigger=0.08,
-        control_frequency=50.0,
-        return_velocity_limit=1.0,
+        arm_velocity_limit=DEFAULTS.arm_velocity_limit,
+        hand_velocity_limit=DEFAULTS.hand_velocity_limit,
+        collision_margin=DEFAULTS.collision_margin,
+        collision_trigger=DEFAULTS.collision_trigger,
+        control_frequency=DEFAULTS.control_frequency,
+        return_velocity_limit=DEFAULTS.return_velocity_limit,
     ):
         if not np.isfinite(control_frequency) or control_frequency <= 0:
             raise ValueError("control_frequency must be finite and positive")
@@ -307,7 +309,7 @@ class AgibotX2TeleopController(MujocoTeleopController):
         # so staggered arm engagement cannot assign different axes to each hand.
         for name, config in self.manipulator_config.items():
             grip = self.xr_client.get_key_value_by_name(config["control_trigger"])
-            self.active[name] = np.isfinite(grip) and grip > 0.9
+            self.active[name] = np.isfinite(grip) and grip > DEFAULTS.grip_threshold
         any_active = any(self.active.values())
         if not any_active:
             self._heading_captured = False
@@ -479,109 +481,11 @@ class AgibotX2TeleopController(MujocoTeleopController):
                 continue
         raise RuntimeError("no collision-free return step found")
 
-    def _update_collision_constraint(self, constraint):
-        """Build the native clearance inequalities from cached exact witnesses.
-
-        X2 has a masked floating base and scalar hinge joints, so velocity
-        columns 6: map directly to configuration columns 7:. Nonlinear command
-        validation and the finite-difference penetration recovery stay separate.
-        """
-        distances, jacobian = self.collision_checker.linearized_clearance(self.collision_trigger)
-        configuration = self.placo_robot.state.q
-        if distances.size == 0:
-            # Placo rejects empty half-space matrices. A single tautology keeps
-            # the persistent constraint valid until a nearby pair appears.
-            constraint.A = np.zeros((1, len(configuration)))
-            constraint.b = np.ones(1)
-            return
-        matrix = np.zeros((len(distances), len(configuration)))
-        matrix[:, 7:] = -jacobian[:, 6:]
-        constraint.A = matrix
-        constraint.b = distances - self._solver_collision_margin + matrix @ configuration
-
-    def _add_recovery_constraint(self, distances, solver=None):
-        """Keep each nearby pair from worsening while soft avoidance separates it.
-
-        Finite differences include signed primitive penetration, where separation of
-        several pairs must be coordinated. Only gripped arms may move.
-        """
-        robot = self.placo_robot
-        previous = robot.state.q.copy()
-        nearby = distances < self.collision_trigger
-        jacobian = np.zeros((np.count_nonzero(nearby), len(previous)))
-        epsilon = 1e-5
-        try:
-            for name, joints in self.arm_joints.items():
-                if not self.active[name]:
-                    continue
-                for joint in joints:
-                    offset = robot.get_joint_offset(joint)
-                    plus, minus = previous.copy(), previous.copy()
-                    plus[offset] += epsilon
-                    minus[offset] -= epsilon
-                    robot.state.q = plus
-                    d_plus = self.collision_checker.distances()[nearby]
-                    robot.state.q = minus
-                    d_minus = self.collision_checker.distances()[nearby]
-                    jacobian[:, offset] = (d_plus - d_minus) / (2 * epsilon)
-        finally:
-            robot.state.q = previous
-            robot.update_kinematics()
-        # d(q + dq) >= min(d(q), margin), expressed as A q_new <= b.
-        current = distances[nearby]
-        floor = np.minimum(current, self.collision_margin)
-        constraint = (self.solver if solver is None else solver).add_joint_space_half_spaces_constraint(
-            -jacobian, current - floor - jacobian @ previous
-        )
-        constraint.configure("x2_recovery_clearance", "hard")
-        return constraint
-
-    def _check_collision_clearance(self):
-        if np.any(self.collision_checker.distances() < self.collision_margin - 1e-6):
-            raise RuntimeError("X2 self-collision clearance violated")
-
     def _project_hand_commands(self, configuration, commands):
         for actuator, offset in self.hand_command_offsets.items():
             configuration[offset] = commands[actuator]
         for target, source, coefficients in self.hand_couplings:
             configuration[target] = polyval(configuration[source], coefficients)
-
-    def _collision_motion_samples(self, start, target, coupled_hands):
-        """Sample coupled finger motion while preserving measured tracking error.
-
-        A passive joint follows its polynomial plus a linearly decaying initial
-        tracking error. Derivative bounds keep every joint's sample spacing
-        within COLLISION_CHECK_STEP_RAD, including nonlinear passive motion.
-        """
-        if not np.all(np.isfinite(start)) or not np.all(np.isfinite(target)):
-            raise RuntimeError("non-finite X2 collision configuration")
-        delta = target - start
-        rates = np.abs(delta)
-        max_abs = np.maximum(np.abs(start), np.abs(target))
-        corrections = []
-        if coupled_hands:
-            for passive, source, coefficients in self.hand_couplings:
-                initial_error = start[passive] - polyval(start[source], coefficients)
-                final_error = target[passive] - polyval(target[source], coefficients)
-                slope = polyval(max_abs[source], np.arange(1, len(coefficients)) * np.abs(coefficients[1:]))
-                rates[passive] = slope * rates[source] + abs(final_error - initial_error)
-                max_abs[passive] = polyval(max_abs[source], np.abs(coefficients)) + max(
-                    abs(initial_error), abs(final_error)
-                )
-                corrections.append((passive, source, coefficients, initial_error, final_error))
-        max_rate = float(np.max(rates[7:]))
-        if not np.isfinite(max_rate) or max_rate > self.MAX_COLLISION_SAMPLES * self.COLLISION_CHECK_STEP_RAD:
-            raise RuntimeError("X2 collision motion exceeds sampling budget")
-        steps = max(1, int(np.ceil(max_rate / self.COLLISION_CHECK_STEP_RAD)))
-        fractions = np.linspace(0, 1, steps + 1)[1:]
-        samples = start + fractions[:, None] * delta
-        for passive, source, coefficients, initial_error, final_error in corrections:
-            samples[:, passive] = (
-                polyval(samples[:, source], coefficients) + (1 - fractions) * initial_error + fractions * final_error
-            )
-        if not np.all(np.isfinite(samples)):
-            raise RuntimeError("non-finite X2 collision motion")
-        return samples
 
     def _validate_collision_motion(self, measured, hand_commands=None, previous_commands=None):
         """Check sampled joint-space motion to the exact outgoing arm commands.

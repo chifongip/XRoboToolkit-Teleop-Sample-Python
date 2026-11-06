@@ -24,11 +24,13 @@ dependencies = [
 x2 = [
     "mujoco",
     "tyro",
+    "pyzmq",
 ]
 # The original complete dependency set for all robot examples.
 all = [
     "mujoco",
     "tyro",
+    "pyzmq",
     "ur_rtde",
     "dynamixel-sdk",
     "rospkg",
