@@ -80,6 +80,7 @@ class RoboJuDoX2Bridge:
         self._xr_updates = 0
         self._xr_grips = {}
         self._xr_report_at = time.monotonic()
+        self._timing_ms = {}
 
     def close(self):
         self._resources.close()
@@ -162,6 +163,7 @@ class RoboJuDoX2Bridge:
             self._xr_grips,
             getattr(self, "_robot_intent", "no feedback"),
         )
+        logger.info("Arm round-trip timing (ms): %s", {key: round(value, 1) for key, value in self._timing_ms.items()})
         self._xr_updates = 0
         self._xr_report_at = now
 
@@ -220,13 +222,27 @@ class RoboJuDoX2Bridge:
             self._key = key
             self._state_id = -1
             self._pending_baseline = None
+            self._timing_ms.clear()
         if latest["state_id"] <= self._state_id:
             return False
         self._state_id = latest["state_id"]
         self._received_at = now
         self._feedback_timeout = latest["feedback_timeout_s"]
         self._robot_intent = latest["intent"]
+        self._timing_ms["feedback_age_at_publish"] = 1000 * max(latest["joint_age_s"].values())
+        pipeline_timing = latest.get("pipeline_timing_ms", {})
+        for name in ("policy", "env_step"):
+            self._timing_ms.pop(name, None)
+            if isinstance(pipeline_timing, dict):
+                try:
+                    value = _number(pipeline_timing.get(name))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if value >= 0:
+                    self._timing_ms[name] = value
         baseline = (*key, latest["command_id"])
+        if self._pending_baseline is not None and baseline != self._pending_baseline:
+            self._timing_ms["ack_wait"] = 1000 * (now - self._pending_at)
         if self._pending_baseline == baseline:
             if now - self._pending_at <= self._feedback_timeout:
                 return False
@@ -236,6 +252,7 @@ class RoboJuDoX2Bridge:
             self._warn(ValueError("arm proposal was not acknowledged; rebasing on fresh feedback"))
         self._pending_baseline = None
         try:
+            retarget_started = time.monotonic()
             frame = self._xr_frame() if latest["intent"] == "TRACK" else None
             proposal = self.retargeter.step(
                 latest["positions"],
@@ -250,8 +267,12 @@ class RoboJuDoX2Bridge:
             )
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
-            oldest_age = max(latest["joint_age_s"].values()) + time.monotonic() - now
-            if oldest_age > latest["feedback_timeout_s"]:
+            self._timing_ms["retarget"] = 1000 * (time.monotonic() - retarget_started)
+            # Remote clocks are never compared. This excludes transit/queueing;
+            # the robot performs the authoritative full-age check at application.
+            age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - now
+            self._timing_ms["measurement_age_lower_bound"] = 1000 * age_lower_bound
+            if age_lower_bound > latest["feedback_timeout_s"]:
                 self.retargeter.rebase()
                 self.status = "stale robot feedback"
                 self.hold_reason = "robot measurements expired during retargeting"

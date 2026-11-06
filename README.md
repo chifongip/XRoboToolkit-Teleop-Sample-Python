@@ -88,10 +88,9 @@ explicit mode changes, and a restarted bridge require grip release before engage
 IK starts from acknowledged arm targets; measured servo lag cannot pin an ungripped
 arm outside its command speed window. The posture preference remains at the configured
 default pose, so repeated near-straight-arm movements do not accumulate redundant-joint drift.
-Nonlinear collision rejection tries bounded
-shorter steps, each checked against both measured and acknowledged configurations.
-Explicit teleop disable requests a checked return to defaults,
-which can run without XR tracking. If the bridge is offline the robot retains
+Nonlinear collision rejection tries bounded shorter steps, each checked against
+both measured and acknowledged configurations. Explicit teleop disable requests
+a checked return to defaults, which can run without XR tracking. If the bridge is offline the robot retains
 that request and holds until it recovers. XR `Y` held also requests a return;
 loss of XR freshness ends that button-driven return. Walking, runtime modes,
 and recording controls remain in RoboJuDo. OmniHand integration is deferred.
@@ -103,6 +102,22 @@ It restores body DOFs in the bundled model for observation, masks them during
 IK, and checks the final measured-to-target and previous-to-target paths without
 advancing physics. Robot-owned session, generation, feedback, and command IDs
 prevent old proposals from executing after mode changes or restarts.
+
+For timing diagnostics, run the bridge with `--xr-diagnostics`. It reports SDK
+observations and the latest policy, stepping, retargeting, and acknowledgement durations.
+The measurement-age lower bound excludes transport and queueing; RoboJuDo performs
+the authoritative deadline check using its own clock.
+
+To measure SDK updates without IK or ZMQ, stop the bridge and other SDK clients,
+leave PC Service/headset streaming, and run:
+
+```bash
+python -m xrobotoolkit_teleop.integrations.xr_receive_rate --duration 30 --csv /tmp/xr-rate.csv
+```
+
+This samples timestamps at 200 Hz; it does not count every network packet.
+It reports the observed rate, recent gap p95 (last 4096 updates), lifetime maximum
+gaps, and timeout episodes, without comparing headset and host clocks.
 
 See the [RoboJuDo-Plus guide](https://github.com/chifongip/RoboJuDo-Plus/blob/main/docs/xrobotoolkit_teleop.md)
 for two-terminal setup, protocol details, and synthetic two-process validation.

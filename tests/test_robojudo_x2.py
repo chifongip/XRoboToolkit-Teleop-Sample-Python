@@ -505,6 +505,40 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(self.bridge.poll())
         self.assertEqual(len(self.bridge.commands.frames), 2)
 
+    def test_roundtrip_diagnostics_include_pipeline_compute_and_ack_delays(self):
+        self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            self.assertEqual(self.bridge._timing_ms["policy"], 55.0)
+            self.assertEqual(self.bridge._timing_ms["env_step"], 4.0)
+            self.assertIn("retarget", self.bridge._timing_ms)
+            self.assertIn("measurement_age_lower_bound", self.bridge._timing_ms)
+            clock.return_value = 100.06
+            self.state["state_id"] += 1
+            self.state["command_id"] += 1
+            self.bridge.feedback.messages.append(self.state)
+            self.assertTrue(self.bridge.poll())
+            self.assertAlmostEqual(self.bridge._timing_ms["ack_wait"], 60.0)
+
+    def test_optional_timing_metadata_cannot_break_control_or_retain_old_mode_values(self):
+        self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
+        self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+        self.assertTrue(self.bridge.poll())
+        self.state["state_id"] += 1
+        self.state["command_id"] += 1
+        self.state["pipeline_timing_ms"] = {"policy": 10**400, "env_step": float("nan")}
+        self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+        self.assertTrue(self.bridge.poll())
+        self.assertNotIn("policy", self.bridge._timing_ms)
+        self.assertNotIn("env_step", self.bridge._timing_ms)
+        self.state["state_id"] += 1
+        self.state["generation"] += 1
+        self.state["intent"] = "HOLD"
+        self.bridge.feedback.messages.append(self.state)
+        self.assertFalse(self.bridge.poll())
+        self.assertNotIn("ack_wait", self.bridge._timing_ms)
+
     def test_lost_home_proposal_retries_after_deadline(self):
         with patch("time.monotonic", return_value=100.0) as clock:
             self.bridge.feedback.messages.append(self.state)
