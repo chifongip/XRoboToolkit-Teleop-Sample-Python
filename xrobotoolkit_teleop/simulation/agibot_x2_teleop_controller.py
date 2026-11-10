@@ -1,6 +1,6 @@
-"""Fixed-body X2 arm teleoperation; no robot hardware connections."""
+"""Fixed-body X2 teleoperation with independently loaded IK backends."""
 
-import json
+from contextlib import ExitStack
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -8,25 +8,24 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
-import placo
 from meshcat import transformations as tf
 from mujoco import viewer as mj_viewer
 from numpy.polynomial.polynomial import polyval
 
-from xrobotoolkit_teleop.common.x2_collision import X2CollisionMixin
+from xrobotoolkit_teleop.common.xr_client import XrClient
 from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
+from xrobotoolkit_teleop.ik import BACKENDS, create_backend
+from xrobotoolkit_teleop.ik.safety import CollisionPolicy
+from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint, PoseTarget, RobotSpec
 from xrobotoolkit_teleop.simulation.agibot_x2_hand_config import HAND_CLOSED
-from xrobotoolkit_teleop.simulation.mujoco_teleop_controller import (
-    MujocoTeleopController,
-)
+from xrobotoolkit_teleop.simulation.x2_runtime import X2MujocoRuntime
 from xrobotoolkit_teleop.utils.collision_checks import CollisionChecker
 from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, apply_delta_pose
-from xrobotoolkit_teleop.utils.mujoco_utils import calc_placo_q_from_mujoco_qpos
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
 
 
-class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
-    """Two controller poses drive hand-center frames; released grips hold commands."""
+class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
+    """Shared XR targets, command protection, and simulation for every backend."""
 
     XR_TRACKING_TIMEOUT_S = DEFAULTS.tracking_timeout_s
     HAND_CLOSED = HAND_CLOSED
@@ -36,7 +35,6 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         xml_path,
         robot_urdf_path,
         scale_factor=DEFAULTS.scale_factor,
-        visualize_placo=False,
         arm_velocity_limit=DEFAULTS.arm_velocity_limit,
         hand_velocity_limit=DEFAULTS.hand_velocity_limit,
         collision_margin=DEFAULTS.collision_margin,
@@ -44,11 +42,17 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         control_frequency=DEFAULTS.control_frequency,
         return_velocity_limit=DEFAULTS.return_velocity_limit,
         ik_backend="placo",
+        visualize_ik=False,
     ):
-        if ik_backend not in ("placo", "lerobot"):
-            raise ValueError("ik_backend must be placo or lerobot")
+        ik_backend = getattr(ik_backend, "value", ik_backend)
+        if ik_backend not in BACKENDS:
+            raise ValueError(f"ik_backend must be one of {tuple(BACKENDS)}")
         self.ik_backend = ik_backend
-        self.lerobot_ik = None
+        self.backend = None
+        self._closed = False
+        self._pending_proposal = None
+        if not np.isfinite(scale_factor) or scale_factor <= 0:
+            raise ValueError("scale_factor must be finite and positive")
         if not np.isfinite(control_frequency) or control_frequency <= 0:
             raise ValueError("control_frequency must be finite and positive")
         control_dt = 1.0 / control_frequency
@@ -71,10 +75,6 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             raise ValueError("collision_trigger must be finite and greater than collision_margin")
         self.collision_margin = collision_margin
         self.collision_trigger = collision_trigger
-        if ik_backend == "lerobot":
-            from xrobotoolkit_teleop.common.lerobot_ik import load_dependencies
-
-            load_dependencies()
         config = {
             f"{side}_arm": {
                 "link_name": f"{side}_hand_center",
@@ -92,19 +92,16 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 xml_path=xml_path,
                 robot_urdf_path=robot_urdf_path,
                 manipulator_config=config,
-                floating_base=False,
                 scale_factor=scale_factor,
-                visualize_placo=visualize_placo,
+                visualize_ik=visualize_ik,
+                xr_factory=XrClient,
                 dt=control_dt,
             )
             # Require an advancing stream, not just cached poses from the SDK.
             self._last_xr_timestamp_ns = self.xr_client.get_timestamp_ns()
             self._last_xr_update_at = None
         except Exception:
-            if self.lerobot_ik is not None:
-                self.lerobot_ik.close()
-            if hasattr(self, "xr_client"):
-                self.xr_client.close()
+            self.close()
             raise
 
     def _robot_setup(self):
@@ -189,100 +186,9 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                     raise ValueError(f"Invalid URDF velocity limit for {joint}")
                 self.hand_velocity_limits[i] = min(self.hand_velocity_limit, urdf_limit)
 
-    def _placo_setup(self):
-        super()._placo_setup()
-        model_names = set(self.placo_robot.joint_names())
-        arm_names = {name for name in model_names if name.startswith(("left_", "right_"))}
-        self._configure_actuators(arm_names)
-        mj_names = {self.mj_model.joint(i).name for i in range(self.mj_model.njnt)}
-        if model_names != mj_names:
-            raise ValueError("Omnihand Pro requires x2_omnihand_ik.urdf with matching articulated hand joints")
-        self.hand_joint_names = sorted(model_names - arm_names)
-        for joint in self.hand_joint_names:
-            self.solver.mask_dof(joint)
-            # These DOFs are observations, including passive coupled joints.
-            # MuJoCo enforces their limits; arm IK must remain feasible when
-            # measured fingers slightly overshoot a limit during dynamics.
-            self.placo_robot.set_joint_limits(joint, -1e6, 1e6)
-        self.hand_command_offsets = {
-            actuator: self.placo_robot.get_joint_offset(
-                self.mj_model.joint(self.mj_model.actuator_trnid[actuator, 0]).name
-            )
-            for actuators in self.hand_actuators.values()
-            for actuator in actuators
-        }
-        self._configure_hand_couplings()
-        self.arm_joints = {
-            f"{side}_arm": sorted(name for name in arm_names if name.startswith(f"{side}_"))
-            for side in ("left", "right")
-        }
-        if any(len(names) != 7 for names in self.arm_joints.values()):
-            raise ValueError("X2 requires seven joints per arm")
-        self._update_robot_state()
-        for config in self.manipulator_config.values():
-            name = config["link_name"]
-            position, quaternion = self._get_link_pose(name)
-            ik_pose = self.placo_robot.get_T_world_frame(name)
-            if not (
-                np.allclose(position, ik_pose[:3, 3], atol=1e-4, rtol=0)
-                and np.allclose(tf.quaternion_matrix(quaternion)[:3, :3], ik_pose[:3, :3], atol=1e-3, rtol=0)
-            ):
-                raise ValueError(
-                    "MuJoCo and IK hand-center frames do not match; Omnihand Pro requires x2_omnihand_ik.urdf"
-                )
-        self.sync_end_effector_poses_to_placo_tasks()
-        if self.ik_backend == "lerobot":
-            from xrobotoolkit_teleop.common.lerobot_ik import LeRobotIKBackend
-
-            limits = {name: tuple(self.mj_model.actuator_ctrlrange[i]) for i, name in self.arm_actuators.items()}
-            self.lerobot_ik = LeRobotIKBackend(self.robot_urdf_path, list(self.arm_actuators.values()), limits)
-            measured = {name: self.placo_robot.get_joint(name) for name in arm_names}
-            for side, pose in self.lerobot_ik.forward_kinematics(measured).items():
-                expected = self.placo_robot.get_T_world_frame(f"{side}_hand_center")
-                if not np.allclose(pose, expected, atol=1e-5, rtol=0):
-                    raise ValueError("LeRobot and X2 hand-center frames do not match")
-            self._update_mocap_target()
-            return
-        for name, task in self.effector_task.items():
-            # Favor hand-center tracking over the generic manipulability objective.
-            task.configure(name, "soft", 10.0)
-        self.solver.enable_joint_limits(True)
-        # The requested speed can reduce, but never raise, each URDF limit.
-        for joint in arm_names:
-            offset = self.placo_robot.get_joint_v_offset(joint)
-            urdf_limit = self.placo_robot.model.velocity_limit[offset]
-            self.placo_robot.set_velocity_limit(joint, min(self.arm_velocity_limit, urdf_limit))
-        self.solver.enable_velocity_limits(True)
-        # Explicitly load the same pairs for custom URDFs, too. Missing collision
-        # shapes must fail setup rather than silently disable protection.
-        pair_file = "collisions_omnihand.json" if self.hand_joint_names else "collisions.json"
-        pair_path = Path(ASSET_PATH) / "agibot/x2" / pair_file
-        pairs = json.loads(pair_path.read_text())
-        urdf = ET.parse(self.robot_urdf_path).getroot()
-        for name in {name for pair in pairs for name in pair}:
-            if urdf.find(f"link[@name='{name}']/collision/geometry") is None:
-                raise ValueError(f"X2 IK URDF requires collision geometry for {name}")
-        self.placo_robot.load_collision_pairs(str(pair_path))
-        self.collision_checker = CollisionChecker(self.placo_robot)
-        self.collision_pair_count = self.collision_checker.pair_count
-        self._check_collision_clearance()
-        self.collision_constraint = self.solver.add_joint_space_half_spaces_constraint(
-            np.zeros((0, self.placo_robot.model.nq)), np.zeros(0)
-        )
-        self.collision_constraint.configure("x2_self_collision", "hard")
-        # Reserve up to 2 mm for nonlinear distance changes after the QP's
-        # linearized step. The command check still enforces the requested margin.
-        reserve = min(0.002, (self.collision_trigger - self.collision_margin) / 2)
-        self._solver_collision_margin = self.collision_margin + reserve
-        self._update_collision_constraint(self.collision_constraint)
-        self.posture_task = self.solver.add_joints_task()
-        self.posture_task.set_joints({name: self.placo_robot.get_joint(name) for name in arm_names})
-        self.posture_task.configure("arm_posture", "soft", 1e-4)
-        self._update_mocap_target()
-
     def _configure_hand_couplings(self):
         """Validate and order passive joints so each is projected exactly once."""
-        model, robot = self.mj_model, self.placo_robot
+        model, robot = self.mj_model, self.robot
         passive = set(self.hand_joint_names) - {
             model.joint(model.actuator_trnid[actuator, 0]).name for actuator in self.hand_command_offsets
         }
@@ -318,19 +224,166 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         self.ref_controller_xyz[name] = None
         self.ref_controller_quat[name] = None
 
-    def _update_ik(self):
+    def _backend_setup(self):
+        root = ET.parse(self.robot_urdf_path).getroot()
+        movable = {j.get("name") for j in root.findall("joint") if j.get("type") != "fixed"}
+        arm_names = {name for name in movable if name.startswith(("left_", "right_"))}
+        self._configure_actuators(arm_names)
+        mj_names = {self.mj_model.joint(i).name for i in range(self.mj_model.njnt)}
+        if movable != mj_names:
+            raise ValueError("Omnihand Pro requires x2_omnihand_ik.urdf with matching articulated hand joints")
+        self.arm_joints = {
+            f"{side}_arm": sorted(n for n in arm_names if n.startswith(f"{side}_")) for side in ("left", "right")
+        }
+        if any(len(names) != 7 for names in self.arm_joints.values()):
+            raise ValueError("X2 requires seven joints per arm")
+        self.hand_joint_names = sorted(movable - arm_names)
+        self.position_limits = {}
+        velocities = {}
+        for actuator, name in self.arm_actuators.items():
+            limit = root.find(f"joint[@name='{name}']/limit")
+            if limit is None:
+                raise ValueError(f"Missing URDF limits for {name}")
+            urdf_lower, urdf_upper, velocity = (float(limit.get(key, "nan")) for key in ("lower", "upper", "velocity"))
+            if not np.isfinite([urdf_lower, urdf_upper, velocity]).all() or urdf_lower >= urdf_upper or velocity <= 0:
+                raise ValueError(f"Invalid URDF limits for {name}")
+            lower, upper = self.mj_model.actuator_ctrlrange[actuator]
+            self.position_limits[name] = (max(lower, urdf_lower), min(upper, urdf_upper))
+            velocities[name] = velocity
+            if self.position_limits[name][0] >= self.position_limits[name][1]:
+                raise ValueError(f"Incompatible position limits: {name}")
+        initial = {name: float(self.mj_data.qpos[self.mj_model.joint(name).qposadr[0]]) for name in movable}
+        pair_file = "collisions_omnihand.json" if self.hand_joint_names else "collisions.json"
+        spec = RobotSpec(
+            self.robot_urdf_path,
+            tuple(self.arm_actuators.values()),
+            {name: config["link_name"] for name, config in self.manipulator_config.items()},
+            {key: tuple(names) for key, names in self.arm_joints.items()},
+            self.position_limits,
+            initial,
+            str(Path(ASSET_PATH) / "agibot/x2" / pair_file),
+            self.dt,
+        )
+        self.backend = create_backend(self.ik_backend, spec)
+        self.robot = self.backend.robot
+        for joint in arm_names:
+            self.robot.set_velocity_limit(joint, min(self.arm_velocity_limit, velocities[joint]))
+        self.hand_command_offsets = {
+            actuator: self.robot.get_joint_offset(self.mj_model.joint(self.mj_model.actuator_trnid[actuator, 0]).name)
+            for actuators in self.hand_actuators.values()
+            for actuator in actuators
+        }
+        self._configure_hand_couplings()
         self._update_robot_state()
-        if self.ik_backend == "placo":
-            self.collision_checker.clear_cache()
+        for name, config in self.manipulator_config.items():
+            xyz, quaternion = self._get_link_pose(config["link_name"])
+            measured = tf.quaternion_matrix(quaternion)
+            measured[:3, 3] = xyz
+            if not np.allclose(measured, self.robot.get_T_world_frame(config["link_name"]), atol=1e-4, rtol=0):
+                raise ValueError("MuJoCo and IK hand-center frames do not match; check the IK URDF")
+            self.effector_task[name] = PoseTarget(measured)
+        self.collision_checker = CollisionChecker(self.robot)
+        self.collision_pair_count = self.collision_checker.pair_count
+        self._check_collision_clearance()
+        self.collision_constraint = LinearConstraint(np.zeros((1, self.robot.model.nq)), np.ones(1))
+        reserve = min(0.002, (self.collision_trigger - self.collision_margin) / 2)
+        self._solver_collision_margin = self.collision_margin + reserve
+        self._update_collision_constraint(self.collision_constraint)
+        self._update_mocap_target()
+
+    def _command_bounds(self, homing=False):
+        result = {}
+        for actuator, name in self.arm_actuators.items():
+            previous = float(self.mj_data.ctrl[actuator])
+            lower, upper = self.position_limits[name]
+            velocity = self.robot.model.velocity_limit[self.robot.get_joint_v_offset(name)]
+            if homing:
+                velocity = min(velocity, self.return_velocity_limit)
+            step = velocity * self.dt
+            if self.active[f"{name.split('_', 1)[0]}_arm"]:
+                bounds = max(lower, previous - step), min(upper, previous + step)
+            else:
+                bounds = previous, previous
+            if bounds[0] > bounds[1] or not lower <= previous <= upper:
+                raise RuntimeError(f"Previous joint command outside position limits: {name}")
+            result[name] = bounds
+        return result
+
+    def _make_problem(self, bounds, joint_target=None):
+        robot = self.robot
+        measured = {n: robot.get_joint(n) for n in self.backend.spec.joints}
+        previous = {name: float(self.mj_data.ctrl[i]) for i, name in self.arm_actuators.items()}
+        distances = self.collision_checker.distances()
+        self._update_collision_constraint(self.collision_constraint)
+        recovering = np.any(distances < self.collision_margin - 1e-6)
+        recovery = self._add_recovery_constraint(distances) if recovering else None
+        offsets = np.array([robot.get_joint_offset(n) for n in self.backend.spec.joints])
+        fixed = robot.state.q.copy()
+        fixed[offsets] = 0
+
+        def controlled(constraint):
+            return LinearConstraint(constraint.A[:, offsets].copy(), constraint.b - constraint.A @ fixed)
+
+        empty = LinearConstraint(np.zeros((0, len(offsets))), np.zeros(0))
+        return IKProblem(
+            measured,
+            previous,
+            {key: task.T_world_frame.copy() for key, task in self.effector_task.items()},
+            frozenset(n for key, names in self.arm_joints.items() if self.active[key] for n in names),
+            np.array([bounds[n][0] for n in self.backend.spec.joints]),
+            np.array([bounds[n][1] for n in self.backend.spec.joints]),
+            controlled(recovery or self.collision_constraint),
+            controlled(self.collision_constraint) if recovering else empty,
+            self.dt,
+            joint_target,
+        )
+
+    def _propose_checked(self, measured, bounds, joint_target=None):
+        problem = self._make_problem(bounds, joint_target)
+        previous = measured.copy()
+        for actuator, name in self.arm_actuators.items():
+            previous[self.robot.get_joint_offset(name)] = self.mj_data.ctrl[actuator]
+        for attempt in range(2):
+            proposal = self.backend.propose(problem)
+            solution = measured.copy()
+            for name in self.backend.spec.joints:
+                value = proposal.positions[name]
+                if not np.isfinite(value):
+                    self.backend.reject(proposal)
+                    raise RuntimeError("Non-finite IK proposal")
+                lower, upper = bounds[name]
+                solution[self.robot.get_joint_offset(name)] = np.clip(value, lower, upper)
+            for scale in (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125):
+                self.robot.state.q = previous + scale * (solution - previous)
+                try:
+                    self._validate_collision_motion(measured)
+                    if self.hand_command_offsets:
+                        self._validate_collision_motion(measured, self.mj_data.ctrl)
+                except RuntimeError:
+                    continue
+                self._pending_proposal = proposal
+                return
+            self.backend.reject(proposal)
+            self.robot.state.q = measured.copy()
+            self.robot.update_kinematics()
+            if attempt == 0:
+                self.backend.reset()
+        raise RuntimeError("No collision-free IK command found")
+
+    def _update_ik(self):
+        if self._pending_proposal is not None:
+            self.backend.reject(self._pending_proposal)
+            self._pending_proposal = None
+        self._update_robot_state()
+        self.collision_checker.clear_cache()
         self._ik_valid = False
+        self.status = "hold"
         stream_fresh = self._xr_stream_is_fresh()
         self._stream_fresh = stream_fresh
         if self.xr_client.get_button_state_by_name("Y"):
             self._heading_captured = False
             self._update_return_to_default(stream_fresh)
             return
-        # A session lasts until both grips are released. Share one fixed heading
-        # so staggered arm engagement cannot assign different axes to each hand.
         for name, config in self.manipulator_config.items():
             grip = self.xr_client.get_key_value_by_name(config["control_trigger"])
             self.active[name] = np.isfinite(grip) and grip > DEFAULTS.grip_threshold
@@ -339,18 +392,12 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             self._heading_captured = False
         elif stream_fresh and not self._heading_captured:
             self._heading_captured = self._capture_control_heading()
-
         tracking_valid = stream_fresh
         for name, config in self.manipulator_config.items():
-            for joint in self.arm_joints[name]:
-                if self.active[name]:
-                    self.solver.unmask_dof(joint)
-                else:
-                    self.solver.mask_dof(joint)
             if not self.active[name]:
                 self._reset_clutch_reference(name)
+                self.backend.reset(frozenset(self.arm_joints[name]))
                 continue
-
             pose = self._read_valid_xr_pose(config["pose_source"])
             if not stream_fresh or pose is None or not self._heading_captured:
                 tracking_valid = False
@@ -362,74 +409,27 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             target = tf.quaternion_matrix(quat)
             target[:3, 3] = xyz
             self.effector_task[name].T_world_frame = target
-
-        # Process both clutches before holding commands for a tracking failure.
         if not tracking_valid:
-            # Both arms hold, so discard motion from both controllers on every
-            # invalid cycle. Recovery rebases each hand center at its measured pose.
             for name in self.manipulator_config:
                 self._reset_clutch_reference(name)
-            if self.lerobot_ik is not None:
-                self.lerobot_ik.reset()
+            self.backend.reset()
             return
         if not any_active:
-            if self.lerobot_ik is not None:
-                self.lerobot_ik.reset()
+            self.backend.reset()
             return
-        if self.lerobot_ik is not None:
-            measured = {name: self.placo_robot.get_joint(name) for name in self.arm_actuators.values()}
-            previous = {name: float(self.mj_data.ctrl[i]) for i, name in self.arm_actuators.items()}
-            targets = {side: self.effector_task[f"{side}_arm"].T_world_frame for side in ("left", "right")}
-            try:
-                solution = self.lerobot_ik.solve(measured, previous, targets, self.active)
-                for name, value in solution.items():
-                    self.placo_robot.set_joint(name, value)
-                self.placo_robot.update_kinematics()
-                self._ik_valid = True
-            except (RuntimeError, ValueError) as exc:
-                print(f"X2 LeRobot IK failed; holding previous commands: {exc}")
-            return
-        previous = self.placo_robot.state.q.copy()
-        recovery_constraint = None
+        measured = self.robot.state.q.copy()
         try:
-            distances = self.collision_checker.distances()
-            recovering = np.any(distances < self.collision_margin - 1e-6)
-            self._update_collision_constraint(self.collision_constraint)
-            if recovering:
-                # Restoring the full margin in one timestep may be infeasible
-                # under joint speed limits. Favor separation, then independently
-                # reject steps that worsen an existing violation or create one.
-                self.collision_constraint.configure("x2_self_collision", "soft", 1e6)
-                recovery_constraint = self._add_recovery_constraint(distances)
-            self.solver.solve(True)
-            if not np.all(np.isfinite(self.placo_robot.state.q)):
-                raise RuntimeError("non-finite IK solution")
-            solution = self.placo_robot.state.q.copy()
-            # Linearized constraints can slightly worsen another overlapping
-            # primitive pair. Shorten recovery steps until the nonlinear checks pass.
-            scales = (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125) if recovering else (1.0,)
-            for scale in scales:
-                self.placo_robot.state.q = previous + scale * (solution - previous)
-                try:
-                    self._validate_collision_motion(previous)
-                    break
-                except RuntimeError:
-                    if scale == scales[-1]:
-                        raise
+            self._propose_checked(measured, self._command_bounds())
             self._ik_valid = True
-        except RuntimeError as exc:
-            self.placo_robot.state.q = previous
-            self.placo_robot.update_kinematics()
+            self.status = "tracking"
+        except (RuntimeError, ValueError) as exc:
+            self.robot.state.q = measured
+            self.robot.update_kinematics()
+            self.status = f"hold: {exc}"
             print(f"X2 IK failed; holding previous commands: {exc}")
-        finally:
-            self.collision_constraint.configure("x2_self_collision", "hard")
-            if recovery_constraint is not None:
-                self.solver.remove_constraint(recovery_constraint)
 
     def _update_return_to_default(self, stream_fresh):
-        """Approach home at a bounded target speed, with Placo collision checks when selected."""
-        if self.lerobot_ik is not None:
-            self.lerobot_ik.reset()
+        self.backend.reset()
         for name in self.manipulator_config:
             self.active[name] = True
             self._reset_clutch_reference(name)
@@ -437,93 +437,35 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             self._read_valid_xr_pose(config["pose_source"]) is None for config in self.manipulator_config.values()
         ):
             return
-        previous = self.placo_robot.state.q.copy()
+        previous = self.robot.state.q.copy()
         home = self.mj_model.key("home").qpos
         try:
-            bounds = {}
-            for actuator, joint in self.arm_actuators.items():
-                velocity_offset = self.placo_robot.get_joint_v_offset(joint)
-                # Bound changes from the previous servo target. The measured
-                # position includes gravity-induced tracking error, which is not
-                # a one-cycle joint movement. Collision checks still cover the
-                # full measured-to-target and old-to-new target segments.
-                command_delta = self.dt * min(
-                    self.return_velocity_limit, self.placo_robot.model.velocity_limit[velocity_offset]
-                )
-                commanded = self.mj_data.ctrl[actuator]
-                lower = commanded - command_delta
-                upper = commanded + command_delta
-                bounds[joint] = (lower, upper)
-                target = home[self.mj_model.joint(joint).qposadr[0]]
-                self.placo_robot.set_joint(joint, np.clip(target, lower, upper))
-            if self.ik_backend == "placo":
-                try:
-                    self._validate_collision_motion(previous)
-                except RuntimeError:
-                    self.placo_robot.state.q = previous.copy()
-                    self._solve_return_avoidance(previous, home, bounds)
-            self._ik_valid = True
-        except RuntimeError as exc:
-            self.placo_robot.state.q = previous
-            print(f"X2 return to default paused; holding previous commands: {exc}")
-        finally:
-            self.placo_robot.update_kinematics()
-            for name, config in self.manipulator_config.items():
-                self.effector_task[name].T_world_frame = self.placo_robot.get_T_world_frame(config["link_name"])
-
-    def _solve_return_avoidance(self, previous, home, bounds):
-        """Use a collision-constrained posture solve when the direct step is blocked.
-
-        The solver can move joints away from home temporarily to gain clearance.
-        Every proposal still passes the nonlinear command-path checks.
-        """
-        robot = self.placo_robot
-        solver = placo.KinematicsSolver(robot)
-        solver.dt = self.dt
-        solver.mask_fbase(True)
-        for joint in self.hand_joint_names:
-            solver.mask_dof(joint)
-        solver.enable_joint_limits(True)
-        # Explicit target bounds below enforce speed limits. A velocity bound
-        # centered on measured positions would reintroduce the servo-error stall.
-        solver.enable_velocity_limits(False)
-        posture = solver.add_joints_task()
-        posture.set_joints(
-            {joint: home[self.mj_model.joint(joint).qposadr[0]] for joint in self.arm_actuators.values()}
-        )
-        posture.configure("return_home", "soft", 1.0)
-        # Bound the outgoing servo target step independently of tracking error.
-        rows, limits = [], []
-        for joint, (lower, upper) in bounds.items():
-            row = np.zeros(len(previous))
-            row[robot.get_joint_offset(joint)] = 1.0
-            rows.extend((row, -row))
-            limits.extend((upper, -lower))
-        constraint = solver.add_joint_space_half_spaces_constraint(np.array(rows), np.array(limits))
-        constraint.configure("return_step_limits", "hard")
-        avoidance = solver.add_joint_space_half_spaces_constraint(np.zeros((0, len(previous))), np.zeros(0))
-        self._update_collision_constraint(avoidance)
-        distances = self.collision_checker.distances()
-        recovering = np.any(distances < self.collision_margin - 1e-6)
-        avoidance.configure("return_collision", "soft" if recovering else "hard", 1e6)
-        if recovering:
-            self._add_recovery_constraint(distances, solver=solver)
-        solver.solve(True)
-        solution = robot.state.q.copy()
-        if not np.all(np.isfinite(solution)):
-            raise RuntimeError("non-finite return solution")
-        for scale in (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125):
-            robot.state.q = previous + scale * (solution - previous)
-            if any(
-                not lower - 1e-9 <= robot.get_joint(joint) <= upper + 1e-9 for joint, (lower, upper) in bounds.items()
-            ):
-                continue
+            bounds = self._command_bounds(homing=True)
+            for name, (lower, upper) in bounds.items():
+                target = home[self.mj_model.joint(name).qposadr[0]]
+                self.robot.set_joint(name, np.clip(target, lower, upper))
             try:
                 self._validate_collision_motion(previous)
-                return
+                if self.hand_command_offsets:
+                    self._validate_collision_motion(previous, self.mj_data.ctrl)
             except RuntimeError:
-                continue
-        raise RuntimeError("no collision-free return step found")
+                self.robot.state.q = previous.copy()
+                self.robot.update_kinematics()
+                self._solve_return_avoidance(previous, home, bounds)
+            self._ik_valid = True
+            self.status = "homing"
+        except (RuntimeError, ValueError) as exc:
+            self.robot.state.q = previous
+            self.status = f"hold: {exc}"
+            print(f"X2 return to default paused; holding previous commands: {exc}")
+        finally:
+            self.robot.update_kinematics()
+            for name, config in self.manipulator_config.items():
+                self.effector_task[name].T_world_frame = self.robot.get_T_world_frame(config["link_name"])
+
+    def _solve_return_avoidance(self, previous, home, bounds):
+        target = {name: float(home[self.mj_model.joint(name).qposadr[0]]) for name in self.backend.spec.joints}
+        self._propose_checked(previous, bounds, target)
 
     def _project_hand_commands(self, configuration, commands):
         for actuator, offset in self.hand_command_offsets.items():
@@ -538,11 +480,11 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         positions. Check both measured-to-target and old-to-new target segments.
         These are discrete checks, not continuous collision detection.
         """
-        candidate = self.placo_robot.state.q.copy()
+        candidate = self.robot.state.q.copy()
         target, held = candidate.copy(), measured.copy()
         previous_commands = self.mj_data.ctrl if previous_commands is None else previous_commands
         for actuator, joint in self.arm_actuators.items():
-            offset = self.placo_robot.get_joint_offset(joint)
+            offset = self.robot.get_joint_offset(joint)
             held[offset] = previous_commands[actuator]
             if not self.active.get(f"{joint.split('_', 1)[0]}_arm", False):
                 target[offset] = held[offset]
@@ -554,10 +496,10 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         try:
             if not all(np.all(np.isfinite(q)) for q in (measured, held, target)):
                 raise RuntimeError("non-finite X2 collision configuration")
-            self.placo_robot.state.q = measured
+            self.robot.state.q = measured
             measured_distances = self.collision_checker.distances()
             recovering = np.any(measured_distances < self.collision_margin - 1e-6)
-            self.placo_robot.state.q = held
+            self.robot.state.q = held
             held_distances = self.collision_checker.baseline(self.collision_margin)
             for start, distances, measured_path in (
                 (measured, measured_distances, True),
@@ -576,14 +518,14 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 # Initial distances establish the floor; sample the coupled
                 # command path rather than a chord between passive endpoints.
                 for configuration in self._collision_motion_samples(start, target, hand_commands is not None):
-                    self.placo_robot.state.q = configuration
+                    self.robot.state.q = configuration
                     values = self.collision_checker.clearance_bounds(floor) if use_bounds else None
                     if values is None or np.any(values < floor):
                         values = self.collision_checker.distances()
                     if np.any(values < floor - 1e-6):
                         index = int(np.argmin(values - floor))
                         a, b = map(int, self.collision_checker.pair_indices[index])
-                        objects = self.placo_robot.collision_model.objects
+                        objects = self.robot.collision_model.objects
                         raise RuntimeError(
                             f"X2 self-collision clearance violated: {objects[a].name} / "
                             f"{objects[b].name}: {values[index]:.6f} m < {floor[index]:.6f} m"
@@ -599,8 +541,8 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                     ):
                         raise RuntimeError("X2 self-collision recovery made no progress")
         finally:
-            self.placo_robot.state.q = candidate
-            self.placo_robot.update_kinematics()
+            self.robot.state.q = candidate
+            self.robot.update_kinematics()
 
     def _xr_stream_is_fresh(self):
         timestamp = self.xr_client.get_timestamp_ns()
@@ -635,10 +577,17 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
 
     def _read_valid_xr_pose(self, source):
         pose = np.asarray(self.xr_client.get_pose_by_name(source), dtype=float)
-        if pose.shape != (7,) or not np.all(np.isfinite(pose)) or np.linalg.norm(pose[3:]) < 1e-6:
+        if pose.shape != (7,) or not np.all(np.isfinite(pose)):
             return None
         pose = pose.copy()
-        pose[3:] /= np.linalg.norm(pose[3:])
+        scale = np.max(np.abs(pose[3:]))
+        if scale == 0:
+            return None
+        quaternion = pose[3:] / scale
+        norm = np.linalg.norm(quaternion)
+        if scale < 1e-6 / norm:
+            return None
+        pose[3:] = quaternion / norm
         return pose
 
     def _send_command(self):
@@ -648,7 +597,7 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 side = joint_name.split("_", 1)[0]
                 if self.active[f"{side}_arm"]:
                     self.mj_data.ctrl[i] = np.clip(
-                        self.placo_robot.get_joint(joint_name), *self.mj_model.actuator_ctrlrange[i]
+                        self.robot.get_joint(joint_name), *self.mj_model.actuator_ctrlrange[i]
                     )
         if self._stream_fresh:
             for side, actuators in self.hand_actuators.items():
@@ -670,20 +619,24 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                     # fingers that have not caught up during trigger reversals.
                     fraction = min(1.0, np.min(max_delta[moving] / np.abs(delta[moving])))
                     self.mj_data.ctrl[indices] += fraction * delta
-        if (
-            self.ik_backend == "placo"
-            and self.hand_command_offsets
-            and not np.array_equal(self.mj_data.ctrl, previous_commands)
-        ):
+        if self.hand_command_offsets and not np.array_equal(self.mj_data.ctrl, previous_commands):
             self._validate_combined_commands(previous_commands)
-        if self.visualize_placo:
-            self._update_placo_viz()
+        if self._pending_proposal is not None:
+            proposal, self._pending_proposal = self._pending_proposal, None
+            if self._ik_valid:
+                self.backend.accept(
+                    proposal, {name: float(self.mj_data.ctrl[i]) for i, name in self.arm_actuators.items()}
+                )
+            else:
+                self.backend.reject(proposal)
+                self.status = "hold: combined collision check rejected commands"
+        self._update_ik_viz()
 
     def _validate_combined_commands(self, previous_commands):
         """Validate combined arm/finger commands, using the MJCF coupling law."""
-        robot = self.placo_robot
+        robot = self.robot
         saved = robot.state.q.copy()
-        measured = calc_placo_q_from_mujoco_qpos(self.mj_model, robot, self.mj_data.qpos)
+        measured = self._measured_configuration()
 
         def check(commands):
             candidate = measured.copy()
@@ -713,6 +666,7 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 if not arm_is_valid:
                     self.mj_data.ctrl[:] = previous_commands
                     self._ik_valid = False
+                    self.status = "hold: combined collision check rejected commands"
                     saved = measured
                     held = "arm and hand"
                 print(f"X2 collision check failed; holding {held} commands: {exc}")
@@ -726,6 +680,19 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         self._update_mocap_target()
         self._send_command()
         mujoco.mj_step(self.mj_model, self.mj_data, nstep=self.physics_substeps)
+
+    def close(self):
+        """Release every resource, including when another cleanup raises."""
+        if self._closed:
+            return
+        self._closed = True
+        if hasattr(self, "_stop_event"):
+            self._stop_event.set()
+        with ExitStack() as cleanup:
+            for name in ("xr_client", "backend", "_ik_viewer"):
+                resource = getattr(self, name, None)
+                if resource is not None:
+                    cleanup.callback(resource.close)
 
     def run(self):
         try:
@@ -743,7 +710,4 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         except KeyboardInterrupt:
             pass
         finally:
-            self._stop_event.set()
-            if self.lerobot_ik is not None:
-                self.lerobot_ik.close()
-            self.xr_client.close()
+            self.close()

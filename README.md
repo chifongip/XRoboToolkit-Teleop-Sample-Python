@@ -169,7 +169,7 @@ python scripts/simulation/teleop_dual_piper_mujoco.py
 
 The optional `--ik-backend lerobot` selects LeRobot's G1-style nonlinear IK
 adapted to X2. Placo remains the default. See the [backend setup and behavior](docs/lerobot_ik.md)
-for native dependencies, joint-only tracking limits, and headless comparisons.
+for native dependencies, shared command protection, and headless comparisons.
 
 Activate the installed environment (for example, `conda activate xr-robotics`),
 start XRoboToolkit PC Service, and connect the headset and two VR controllers:
@@ -207,8 +207,8 @@ Each **trigger** continuously closes its corresponding hand; release it to open.
 Fingers work independently of the arm grips. The hands retain their nonlinear
 finger coupling, mass, and inertia, with contacts disabled. This mode demonstrates
 hand motion without object grasping. The default arm-only model assigns no trigger
-action. Placo visualization includes the articulated hands and follows their
-measured finger joints. See [hand asset provenance](assets/omnihand_pro/README.md).
+action. The optional IK visualization includes the articulated hands and shows
+the accepted commands, including coupled finger joints. See [hand asset provenance](assets/omnihand_pro/README.md).
 
 Both modes use `left_hand_center` and `right_hand_center` for IK and target
 markers. These fixed frames sit at the bounding-box centers of the rigid hand
@@ -218,8 +218,9 @@ within the hand. The Omnihand option automatically selects its matching
 `x2_omnihand_ik.urdf`; custom scenes require a URDF with matching center frames.
 
 Use `--scale-factor 0.5` for smaller translation movements, or
-`--visualize-placo` to also open the IK visualization. `--xml-path` and
-`--robot-urdf-path` accept matching alternative fixed-body models. Use a custom
+`--visualize-ik` to also open the shared browser IK visualization with either
+backend. `--xml-path` and `--robot-urdf-path` accept matching alternative
+fixed-body models. Use a custom
 `--xml-path` separately from `--with-omnihand`. Alternative models must use the
 same 14 arm joints, optionally with both Omnihand Pro hands, and joint position servos
 with unit gear. Close the
@@ -229,6 +230,20 @@ viewer; the headless checks below require neither a headset nor PC Service.
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+Replay default → T pose → default without a headset or XR PC Service:
+
+```bash
+python scripts/misc/test_x2_ik_offline.py --ik-backend placo --visualize
+python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --with-omnihand --visualize
+```
+
+`--visualize` shows the simulated robot in MuJoCo. Add `--visualize-ik` to open
+the shared browser IK view, or omit both flags for a headless check. The replay
+uses mock XR poses and real IK, collision checks, position servos, and physics.
+It repeats two cycles by default; use `--cycles`, `--move-seconds`, and
+`--hold-seconds` to adjust the motion. It prints a JSON report and exits with
+status 1 if a check fails. See the [offline replay details](docs/lerobot_ik.md#offline-pose-cycle-test).
 
 The demo defaults to **50 Hz** control (20 ms per cycle). Set the target rate with
 `--control-frequency`, for example:
@@ -242,13 +257,13 @@ period. Physics steps are at most 1 ms in the bundled scenes; rates such as 60 H
 use slightly smaller steps so each cycle advances exactly one control period.
 Collision checks can overrun the target period.
 
-The following arm speed and collision details apply to the default `placo`
-backend. The `lerobot` backend uses the [joint-bounded behavior described here](docs/lerobot_ik.md).
-
-Placo IK reuses the baseline query's exact collision witnesses to build the same
-linearized clearance constraints for nearby pairs. This avoids a second full
-distance query inside the solver. Joint limits, velocity limits, penetration
-recovery, and nonlinear command-path checks remain enabled.
+Both backends enforce the following arm speed and collision protections.
+Each uses its own model adapter: Placo native geometry queries for `placo`,
+and Pinocchio/Coal queries for `lerobot`. Shared code builds linearized
+clearance constraints from cached exact witnesses, handles penetration recovery,
+and validates sampled command paths. LeRobot does not call a Placo solver.
+Arm speed bounds are centered on the previous accepted servo commands, so
+servo lag does not increase the permitted command step.
 
 Set the arm IK joint speed cap with `--arm-velocity-limit 2.0` (rad/s; default 8.0). Each arm joint
 uses the lower of this value and its URDF limit (4.188 rad/s for wrist pitch/roll, 13.088 rad/s for
@@ -257,7 +272,7 @@ With Omnihand Pro, `--hand-velocity-limit` separately caps actuated finger targe
 speeds (rad/s; default 2.0), also bounded by each joint's supplied hand URDF limit.
 The former `--velocity-limit` option is now `--arm-velocity-limit`.
 
-With Placo, self-collision avoidance is enabled for both X2 models. Placo uses fitted cylinders
+Self-collision avoidance is enabled for both backends and X2 models, using fitted cylinders
 and compact boxes for the body and arms, with rounded torso sections. Each
 Omnihand preserves its bundled URDF joint chains and collision primitives, updated
 from all measured finger joints, including passive coupled joints.
@@ -268,7 +283,7 @@ also checks sampled motion from measured positions and previous servo targets
 to the outgoing targets, including the held targets of released arms. Invalid
 solutions hold the previous commands. Custom IK URDFs must provide collision
 geometry and joints for the same configured links. The Omnihand IK model includes
-14 arm and 38 observed finger joints; finger DOFs are masked during arm IK.
+14 arm and 38 observed finger joints; finger DOFs are fixed during arm IK.
 Every changed arm/hand command is checked as a combined configuration, including
 held finger targets. Sampled finger motion follows the source MJCF polynomial
 coupling, with passive-joint tracking error carried from the measured state.

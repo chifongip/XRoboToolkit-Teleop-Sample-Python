@@ -67,11 +67,11 @@ class X2CollisionTests(unittest.TestCase):
     def make_controller(self, omnihand=False, **kwargs):
         scene, urdf = ("scene_omnihand.xml", "x2_omnihand_ik.urdf") if omnihand else ("scene.xml", "x2_fixed.urdf")
         with (
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", CollisionXR),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", CollisionXR),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             c = AgibotX2TeleopController(str(ASSETS / scene), str(ASSETS / urdf), **kwargs)
-        self.addCleanup(c.xr_client.close)
+        self.addCleanup(c.close)
         return c
 
     def test_pairs_geometry_and_home_clearance_in_both_modes(self):
@@ -85,68 +85,46 @@ class X2CollisionTests(unittest.TestCase):
                 c = self.make_controller(omnihand)
                 self.assertGreaterEqual(c.collision_pair_count, len(pairs))
                 self.assertEqual(c.collision_constraint.priority, "hard")
-                self.assertGreater(min(d.min_distance for d in c.placo_robot.distances()), c.collision_margin)
+                self.assertGreater(min(d.min_distance for d in c.robot.distances()), c.collision_margin)
                 urdf = ET.parse(c.robot_urdf_path).getroot()
                 kinds = {list(shape.find("geometry"))[0].tag for shape in urdf.findall("link/collision")}
                 self.assertIn("cylinder", kinds)
                 self.assertTrue(kinds <= {"box", "cylinder", "sphere"})
 
-    def test_cached_collision_linearization_matches_native_solver(self):
-        # Compare the entire QP, including inactive joints and soft avoidance
-        # during penetration recovery, against Placo's original constraint.
+    def test_cached_collision_linearization_matches_finite_differences(self):
         for omnihand in (False, True):
             c = self.make_controller(omnihand)
-            native = self.make_controller(omnihand)
-            native.solver.remove_constraint(native.collision_constraint)
-            native.collision_constraint = native.solver.add_avoid_self_collisions_constraint()
-            native.collision_constraint.self_collisions_margin = native._solver_collision_margin
-            native.collision_constraint.self_collisions_trigger = native.collision_trigger
-            with patch.object(native, "_update_collision_constraint"):
-                for pitch, roll in ((None, None), (1.7, 0.0), (2.0, -0.06)):
-                    for left_only in (False, True):
-                        with self.subTest(omnihand=omnihand, pitch=pitch, left_only=left_only):
-                            for controller in (c, native):
-                                mujoco.mj_resetDataKeyframe(
-                                    controller.mj_model, controller.mj_data, controller.mj_model.key("home").id
-                                )
-                                if pitch is not None:
-                                    for joint, value in (
-                                        ("left_shoulder_pitch_joint", pitch),
-                                        ("left_shoulder_roll_joint", roll),
-                                    ):
-                                        controller.mj_data.qpos[controller.mj_model.joint(joint).qposadr] = value
-                                for actuator, joint in controller.arm_actuators.items():
-                                    controller.mj_data.ctrl[actuator] = controller.mj_data.qpos[
-                                        controller.mj_model.joint(joint).qposadr
-                                    ][0]
-                                mujoco.mj_forward(controller.mj_model, controller.mj_data)
-                                controller.xr_client.grips.update(left_grip=1.0, right_grip=0.0 if left_only else 1.0)
-                                for name in controller.manipulator_config:
-                                    controller._reset_clutch_reference(name)
-                                    source = controller.manipulator_config[name]["pose_source"]
-                                    controller.xr_client.poses[source][:3] = 0
-                                controller._update_ik()
-                            self.assertTrue(c._ik_valid)
-                            self.assertTrue(native._ik_valid)
-                            np.testing.assert_allclose(
-                                c.placo_robot.state.q, native.placo_robot.state.q, atol=1e-7, rtol=0
-                            )
-                            for movement in (0.002, 0.005, -0.002):
-                                for controller in (c, native):
-                                    controller.xr_client.poses["left_controller"][0] = movement
-                                    controller._update_ik()
-                                self.assertEqual(c._ik_valid, native._ik_valid)
-                                np.testing.assert_allclose(
-                                    c.placo_robot.state.q, native.placo_robot.state.q, atol=1e-7, rtol=0
-                                )
+            robot = c.robot
+            for pitch in (0.35, 1.7, 2.0):
+                robot.set_joint("left_shoulder_pitch_joint", pitch)
+                robot.update_kinematics()
+                c.collision_checker.clear_cache()
+                baseline = c.collision_checker.distances()
+                nearby = baseline < c.collision_trigger
+                values, jacobian = c.collision_checker.linearized_clearance(c.collision_trigger)
+                np.testing.assert_array_equal(values, baseline[nearby])
+                previous = robot.state.q.copy()
+                for joint in c.arm_joints["left_arm"]:
+                    offset = robot.get_joint_offset(joint)
+                    plus, minus = previous.copy(), previous.copy()
+                    plus[offset] += 1e-5
+                    minus[offset] -= 1e-5
+                    robot.state.q = plus
+                    forward = c.collision_checker.distances()[nearby]
+                    robot.state.q = minus
+                    backward = c.collision_checker.distances()[nearby]
+                    np.testing.assert_allclose(
+                        jacobian[:, robot.get_joint_v_offset(joint)], (forward - backward) / 2e-5, atol=5e-3, rtol=0
+                    )
+                robot.state.q = previous
 
     def test_collision_linearization_reuses_current_witnesses_only(self):
         c = self.make_controller(True)
-        checker, robot = c.collision_checker, c.placo_robot
+        checker, robot = c.collision_checker, c.robot
         checker.clear_cache()
         q = robot.state.q.copy()
         native_distances = robot.distances
-        with patch.object(placo.RobotWrapper, "distances", side_effect=native_distances) as query:
+        with patch.object(robot, "distances", side_effect=native_distances) as query:
             checker.distances()
             distances, jacobian = checker.linearized_clearance(c.collision_trigger)
             self.assertEqual(query.call_count, 1)
@@ -169,7 +147,7 @@ class X2CollisionTests(unittest.TestCase):
         c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
         c._update_ik()
         self.assertTrue(c._ik_valid)
-        np.testing.assert_array_equal(np.atleast_2d(c.collision_constraint.A), np.zeros((1, c.placo_robot.model.nq)))
+        np.testing.assert_array_equal(np.atleast_2d(c.collision_constraint.A), np.zeros((1, c.robot.model.nq)))
         np.testing.assert_array_equal(np.atleast_1d(c.collision_constraint.b), np.ones(1))
 
     def test_articulated_pairs_cover_external_contacts_without_structural_neighbors(self):
@@ -195,7 +173,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_safe_endpoints_with_colliding_intermediate_pose_are_rejected(self):
         c = self.make_controller()
         c.active.update(left_arm=True, right_arm=True)
-        robot = c.placo_robot
+        robot = c.robot
         home = robot.state.q.copy()
         joints = {
             "left_elbow_joint": -1.5901651064,
@@ -222,7 +200,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_invalid_margins_rejected_before_xr_connection(self):
         for kwargs in ({"collision_margin": v} for v in (0, -0.01, np.nan, np.inf)):
-            with patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr:
+            with patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr:
                 with self.assertRaises(ValueError):
                     AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), **kwargs)
                 xr.assert_not_called()
@@ -242,12 +220,14 @@ class X2CollisionTests(unittest.TestCase):
             path = Path(directory) / "missing_collision.urdf"
             ET.ElementTree(root).write(path)
             with (
-                patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", return_value=xr),
+                patch(
+                    "xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", return_value=xr
+                ) as connect,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 with self.assertRaisesRegex(ValueError, "collision geometry for left_elbow_link"):
                     AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(path))
-        self.assertTrue(xr.closed)
+        connect.assert_not_called()
 
     def test_colliding_candidate_is_rejected_and_state_restored(self):
         for omnihand in (False, True):
@@ -255,26 +235,26 @@ class X2CollisionTests(unittest.TestCase):
             c.xr_client.grips["left_grip"] = 1.0
             c._update_ik()
             c._update_robot_state()
-            previous = c.placo_robot.state.q.copy()
+            previous = c.robot.state.q.copy()
             held = c.mj_data.ctrl.copy()
             # Find a real geometric collision, independent of mocked distances.
             rng = np.random.default_rng(14)
             for _ in range(100):
-                c.placo_robot.state.q = previous.copy()
+                c.robot.state.q = previous.copy()
                 for joint in c.arm_joints["left_arm"]:
                     limits = c.mj_model.joint(joint).range
-                    c.placo_robot.set_joint(joint, rng.uniform(*limits))
-                c.placo_robot.update_kinematics()
-                if min(d.min_distance for d in c.placo_robot.distances()) < 0:
-                    unsafe = c.placo_robot.state.q.copy()
+                    c.robot.set_joint(joint, rng.uniform(*limits))
+                c.robot.update_kinematics()
+                if min(d.min_distance for d in c.robot.distances()) < 0:
+                    unsafe = c.robot.state.q.copy()
                     break
             else:
                 self.fail("No colliding fixture found")
-            c.placo_robot.state.q = previous.copy()
-            c.placo_robot.update_kinematics()
+            c.robot.state.q = previous.copy()
+            c.robot.update_kinematics()
 
             def unsafe_solve(*args):
-                c.placo_robot.state.q = unsafe.copy()
+                c.robot.state.q = unsafe.copy()
 
             with (
                 patch.object(placo.KinematicsSolver, "solve", side_effect=unsafe_solve),
@@ -284,7 +264,7 @@ class X2CollisionTests(unittest.TestCase):
                 c._send_command()
             self.assertFalse(c._ik_valid)
             np.testing.assert_array_equal(c.mj_data.ctrl, held)
-            np.testing.assert_allclose(c.placo_robot.state.q, previous, atol=1e-12)
+            np.testing.assert_allclose(c.robot.state.q, previous, atol=1e-12)
 
     def test_inward_teleop_preserves_or_recovers_clearance_of_accepted_commands(self):
         for omnihand in (False, True):
@@ -308,8 +288,8 @@ class X2CollisionTests(unittest.TestCase):
                         accepted += 1
                         # Test the outgoing targets, including held-arm targets.
                         for actuator, joint in c.arm_actuators.items():
-                            c.placo_robot.set_joint(joint, c.mj_data.ctrl[actuator])
-                        c.placo_robot.update_kinematics()
+                            c.robot.set_joint(joint, c.mj_data.ctrl[actuator])
+                        c.robot.update_kinematics()
                         self.assertTrue(
                             np.all(
                                 c.collision_checker.distances()
@@ -339,14 +319,14 @@ class X2CollisionTests(unittest.TestCase):
                     c.mj_data.qpos[c.mj_model.joint(joint).qposadr] = value
                 self._sync_return_test_commands(c)
                 c._update_robot_state()
-                initial = c.placo_robot.state.q.copy()
+                initial = c.robot.state.q.copy()
                 # Both endpoints are clear, but their straight interpolation is blocked.
                 self.assertGreater(c.collision_checker.distances().min(), c.collision_margin)
                 for joint, value in joints.items():
                     home = c.mj_model.key("home").qpos[c.mj_model.joint(joint).qposadr[0]]
-                    c.placo_robot.set_joint(joint, (home + value) / 2)
+                    c.robot.set_joint(joint, (home + value) / 2)
                 self.assertLess(c.collision_checker.distances().min(), c.collision_margin)
-                c.placo_robot.state.q = initial
+                c.robot.state.q = initial
                 c.xr_client.buttons["Y"] = True
                 with patch.object(c, "_solve_return_avoidance", wraps=c._solve_return_avoidance) as avoid:
                     self._run_checked_return(c, dynamics=dynamics)
@@ -399,7 +379,7 @@ class X2CollisionTests(unittest.TestCase):
             for pitch, roll in ((1.7, 0.0), (2.0, -0.06)):
                 with self.subTest(omnihand=omnihand, pitch=pitch):
                     c = self.make_controller(omnihand, arm_velocity_limit=0.5)
-                    m, data, robot = c.mj_model, c.mj_data, c.placo_robot
+                    m, data, robot = c.mj_model, c.mj_data, c.robot
                     for joint, value in (("left_shoulder_roll_joint", roll), ("left_shoulder_pitch_joint", pitch)):
                         data.qpos[m.joint(joint).qposadr] = value
                     for actuator, joint in c.arm_actuators.items():
@@ -442,7 +422,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_recovery_rejects_worsening_or_new_violations(self):
         c = self.make_controller()
         c.active.update(left_arm=True, right_arm=True)
-        robot = c.placo_robot
+        robot = c.robot
         robot.set_joint("left_shoulder_pitch_joint", 1.7)
         robot.set_joint("left_shoulder_roll_joint", 0.0)
         measured = robot.state.q.copy()
@@ -469,7 +449,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_penetrating_previous_target_requires_signed_path_checks(self):
         c = self.make_controller()
         c.active.update(left_arm=True, right_arm=True)
-        robot = c.placo_robot
+        robot = c.robot
         measured = robot.state.q.copy()
         previous = c.mj_data.ctrl.copy()
         joint = "left_shoulder_roll_joint"
@@ -500,7 +480,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_partial_recovery_is_allowed_with_clear_previous_servo_targets(self):
         c = self.make_controller()
         c.active.update(left_arm=True, right_arm=False)
-        robot = c.placo_robot
+        robot = c.robot
         # The actual arm has drifted inside the margin while its old target
         # remains clear. Recovery must not require the new target to reach
         # the full margin in one timestep from that old, clear servo target.
@@ -540,7 +520,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_articulated_hand_fk_collision_placements_and_masked_ik(self):
         c = self.make_controller(True)
-        m, data, robot = c.mj_model, c.mj_data, c.placo_robot
+        m, data, robot = c.mj_model, c.mj_data, c.robot
         root = ET.parse(c.robot_urdf_path).getroot()
         self.assertEqual(len(c.hand_joint_names), 38)
         self.assertFalse(any("envelope" in shape.get("name", "") for shape in root.findall("link/collision")))
@@ -587,7 +567,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_trigger_motion_into_a_real_body_collision_is_rejected(self):
         c = self.make_controller(True)
-        robot, model, data = c.placo_robot, c.mj_model, c.mj_data
+        robot, model, data = c.robot, c.mj_model, c.mj_data
         for joint, value in THUMB_THIGH_POSE.items():
             data.qpos[model.joint(joint).qposadr] = value
         for actuator, joint in c.arm_actuators.items():
@@ -612,7 +592,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_arm_motion_checks_unchanged_held_finger_targets(self):
         c = self.make_controller(True)
-        robot, data = c.placo_robot, c.mj_data
+        robot, data = c.robot, c.mj_data
         measured = robot.state.q.copy()
         # Fingers are still open while the previously accepted close target is
         # pending. Moving the arm toward the thigh must consider that target.
@@ -633,7 +613,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_hand_motion_samples_nonlinear_coupling_with_tracking_error(self):
         c = self.make_controller(True)
-        robot = c.placo_robot
+        robot = c.robot
         source = robot.get_joint_offset("L_index_pip_joint")
         target = robot.get_joint_offset("L_index_dip_joint")
         c.hand_couplings = [(target, source, np.array([0.0, 0.0, 5.0, 0.0, 0.0]))]
@@ -667,7 +647,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_hand_coupling_chains_are_ordered_and_invalid_constraints_rejected(self):
         c = self.make_controller(True)
-        model, robot = c.mj_model, c.placo_robot
+        model, robot = c.mj_model, c.robot
         chain = ["L_thumb_dip_joint", "L_index_dip_joint", "L_middle_dip_joint", "L_ring_pip_joint", "L_ring_dip_joint"]
         source_name = "L_index_pip_joint"
 
@@ -710,7 +690,7 @@ class X2CollisionTests(unittest.TestCase):
 
     def test_collision_samples_bound_nonlinear_passive_motion(self):
         c = self.make_controller(True)
-        robot = c.placo_robot
+        robot = c.robot
         source = robot.get_joint_offset("L_index_pip_joint")
         passive = robot.get_joint_offset("L_index_dip_joint")
         c.hand_couplings = [(passive, source, np.array([0, 0, 16.0, 0, 0]))]
@@ -729,7 +709,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_primitive_clearance_bounds_do_not_certify_unsafe_pairs(self):
         for omnihand in (False, True):
             c = self.make_controller(omnihand)
-            robot = c.placo_robot
+            robot = c.robot
             home = robot.state.q.copy()
             rng = np.random.default_rng(15)
             for _ in range(12):
@@ -746,7 +726,7 @@ class X2CollisionTests(unittest.TestCase):
     def test_motion_bounds_remain_conservative_near_exact_references(self):
         for omnihand in (False, True):
             c = self.make_controller(omnihand)
-            robot, checker = c.placo_robot, c.collision_checker
+            robot, checker = c.robot, c.collision_checker
             home = robot.state.q.copy()
             rng = np.random.default_rng(23)
             for penetrating in (False, True):

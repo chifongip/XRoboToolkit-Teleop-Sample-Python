@@ -1,4 +1,4 @@
-"""Exact Placo distances and conservative primitive-clearance checks."""
+"""Native model distances and conservative primitive-clearance checks."""
 
 import numpy as np
 

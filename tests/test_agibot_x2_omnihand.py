@@ -15,7 +15,6 @@ import numpy as np
 
 from test_agibot_x2_simulation import ASSETS, FakeXR
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
-from xrobotoolkit_teleop.utils.mujoco_utils import calc_placo_q_from_mujoco_qpos
 
 
 def load_script(name):
@@ -61,11 +60,11 @@ class X2OmnihandProTests(unittest.TestCase):
         self, xml_path=ASSETS / "scene_omnihand.xml", robot_urdf_path=ASSETS / "x2_omnihand_ik.urdf", **kwargs
     ):
         with (
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", HandXR),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", HandXR),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             c = AgibotX2TeleopController(str(xml_path), str(robot_urdf_path), **kwargs)
-        self.addCleanup(c.xr_client.close)
+        self.addCleanup(c.close)
         return c
 
     @staticmethod
@@ -268,8 +267,7 @@ class X2OmnihandProTests(unittest.TestCase):
                 j = m.joint(joint)
                 d.qpos[j.qposadr[0]] = np.clip(home[j.qposadr[0]] + rng.uniform(-0.15, 0.15), *j.range)
             mujoco.mj_forward(m, d)
-            c.placo_robot.state.q = calc_placo_q_from_mujoco_qpos(m, c.placo_robot, d.qpos)
-            c.placo_robot.update_kinematics()
+            c._update_robot_state()
             for side, prefix in (("left", "L"), ("right", "R")):
                 name = f"{side}_hand_center"
                 frame, palm, wrist = (m.body(n).id for n in (name, f"{prefix}_palm", f"{side}_wrist_roll_link"))
@@ -282,7 +280,7 @@ class X2OmnihandProTests(unittest.TestCase):
                 )
                 np.testing.assert_allclose(center_in_palm, expected, atol=1e-8)
                 np.testing.assert_allclose(d.xmat[frame], d.xmat[wrist], atol=1e-12)
-                ik_pose = c.placo_robot.get_T_world_frame(name)
+                ik_pose = c.robot.get_T_world_frame(name)
                 np.testing.assert_allclose(ik_pose[:3, 3], d.xpos[frame], atol=1e-4)
                 np.testing.assert_allclose(ik_pose[:3, :3], d.xmat[frame].reshape(3, 3), atol=1e-3)
                 c.effector_task[f"{side}_arm"].T_world_frame = ik_pose
@@ -294,12 +292,12 @@ class X2OmnihandProTests(unittest.TestCase):
     def test_wrong_ik_hand_center_model_is_rejected_and_closes_xr(self):
         xr = HandXR()
         with (
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", return_value=xr),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", return_value=xr) as connect,
             contextlib.redirect_stdout(io.StringIO()),
         ):
             with self.assertRaisesRegex(ValueError, "Omnihand Pro requires x2_omnihand_ik.urdf"):
                 AgibotX2TeleopController(str(ASSETS / "scene_omnihand.xml"), str(ASSETS / "x2_fixed.urdf"))
-        self.assertTrue(xr.closed)
+        connect.assert_not_called()
 
     def test_controller_rotation_targets_the_hand_center_in_both_models(self):
         for scene, urdf in (("scene.xml", "x2_fixed.urdf"), ("scene_omnihand.xml", "x2_omnihand_ik.urdf")):
@@ -359,7 +357,7 @@ class X2OmnihandProTests(unittest.TestCase):
             c.step_control()
         self.assertTrue(c._ik_valid)
         for i, joint in c.arm_actuators.items():
-            expected = c.placo_robot.get_joint(joint) if joint.startswith("left_") else initial[i]
+            expected = c.robot.get_joint(joint) if joint.startswith("left_") else initial[i]
             self.assertAlmostEqual(c.mj_data.ctrl[i], expected)
         for side, trigger in (("left", 0.25), ("right", 0.75)):
             for i, closed in c.hand_actuators[side].items():
@@ -439,8 +437,8 @@ class X2OmnihandProTests(unittest.TestCase):
                 }
                 self.assertEqual(c.hand_velocity_limits, expected)
                 for joint in c.arm_actuators.values():
-                    offset = c.placo_robot.get_joint_v_offset(joint)
-                    self.assertAlmostEqual(c.placo_robot.model.velocity_limit[offset], 0.25)
+                    offset = c.robot.get_joint_v_offset(joint)
+                    self.assertAlmostEqual(c.robot.model.velocity_limit[offset], 0.25)
                 for left, right in ((1.0, 0.5), (0.0, 1.0), (1.0, 0.0)):
                     c.xr_client.grips.update(left_trigger=left, right_trigger=right)
                     for _ in range(100):

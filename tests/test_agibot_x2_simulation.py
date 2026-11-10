@@ -13,7 +13,6 @@ from meshcat import transformations as tf
 import placo
 
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
-from xrobotoolkit_teleop.utils.mujoco_utils import calc_placo_q_from_mujoco_qpos
 
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets/agibot/x2"
@@ -55,18 +54,18 @@ class X2SimulationTests(unittest.TestCase):
 
     def make_controller(self, **kwargs):
         with (
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", FakeXR),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", FakeXR),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             controller = AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), **kwargs)
-        self.addCleanup(controller.xr_client.close)
+        self.addCleanup(controller.close)
         return controller
 
     def test_default_control_frequency_is_50_hz(self):
         c = self.make_controller()
         self.assertEqual(c.control_frequency, 50.0)
         self.assertAlmostEqual(c.dt, 0.02)
-        self.assertAlmostEqual(c.solver.dt, c.dt)
+        self.assertAlmostEqual(c.backend.solver._native.dt, c.dt)
         self.assertEqual(c.physics_substeps, 20)
         c.step_control()
         self.assertAlmostEqual(c.mj_data.time, c.dt, places=12)
@@ -180,7 +179,7 @@ class X2SimulationTests(unittest.TestCase):
             with self.subTest(frequency=frequency):
                 c = self.make_controller(control_frequency=frequency)
                 self.assertAlmostEqual(c.dt, 1 / frequency)
-                self.assertAlmostEqual(c.solver.dt, c.dt)
+                self.assertAlmostEqual(c.backend.solver._native.dt, c.dt)
                 self.assertGreaterEqual(c.physics_substeps, 1)
                 self.assertLessEqual(c.mj_model.opt.timestep, 0.001)
                 self.assertAlmostEqual(c.physics_substeps * c.mj_model.opt.timestep, c.dt, places=12)
@@ -192,7 +191,7 @@ class X2SimulationTests(unittest.TestCase):
         for frequency in (0, -50, np.nan, np.inf, -np.inf, 1e-320):
             with (
                 self.subTest(frequency=frequency),
-                patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+                patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr,
             ):
                 with self.assertRaisesRegex(ValueError, "control_frequency"):
                     AgibotX2TeleopController(
@@ -216,7 +215,8 @@ class X2SimulationTests(unittest.TestCase):
         ]:
             data.qpos[:] = q
             mujoco.mj_forward(m, data)
-            robot.state.q = calc_placo_q_from_mujoco_qpos(m, robot, q)
+            for joint in robot.joint_names():
+                robot.set_joint(joint, q[m.joint(joint).qposadr[0]])
             robot.update_kinematics()
             for side in ("left", "right"):
                 name = f"{side}_hand_center"
@@ -276,8 +276,8 @@ class X2SimulationTests(unittest.TestCase):
                 c = self.make_controller(arm_velocity_limit=requested)
                 effective = {name: min(requested, limit) for name, limit in limits.items()}
                 for name, limit in effective.items():
-                    offset = c.placo_robot.get_joint_v_offset(name)
-                    self.assertAlmostEqual(c.placo_robot.model.velocity_limit[offset], limit)
+                    offset = c.robot.get_joint_v_offset(name)
+                    self.assertAlmostEqual(c.robot.model.velocity_limit[offset], limit)
                 c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
                 c.step_control()
                 # Reach forward/up from the new home so collision rejection
@@ -287,11 +287,12 @@ class X2SimulationTests(unittest.TestCase):
                     c.xr_client.poses[f"{side}_controller"][3:] = np.roll(tf.quaternion_about_axis(0.7, [1, 0, 0]), -1)
                 for _ in range(20):
                     c._update_robot_state()
-                    previous = {name: c.placo_robot.get_joint(name) for name in limits}
+                    previous = {name: float(c.mj_data.ctrl[a]) for a, name in c.arm_actuators.items()}
                     c.step_control()
                     self.assertTrue(c._ik_valid)
                     for name, limit in effective.items():
-                        speed = abs(c.placo_robot.get_joint(name) - previous[name]) / c.dt
+                        actuator = next(a for a, joint in c.arm_actuators.items() if joint == name)
+                        speed = abs(c.mj_data.ctrl[actuator] - previous[name]) / c.dt
                         self.assertLessEqual(speed, limit + 1e-6, name)
 
     def test_invalid_velocity_caps_are_rejected_before_connecting_xr(self):
@@ -299,7 +300,7 @@ class X2SimulationTests(unittest.TestCase):
             for value in (0.0, -1.0, np.nan, np.inf, -np.inf):
                 with (
                     self.subTest(parameter=name, value=value),
-                    patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+                    patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr,
                 ):
                     with self.assertRaisesRegex(ValueError, f"{name} must be finite and positive"):
                         AgibotX2TeleopController(

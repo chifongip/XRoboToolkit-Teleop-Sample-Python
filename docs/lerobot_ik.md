@@ -35,21 +35,149 @@ arrive, the latest solution is used directly. Duplicate raw solutions do not
 advance the window. A uniformly changing signal has two samples of filter
 delay (40 ms at 50 Hz), in addition to solver and servo delays.
 
-Tracking uses intersected URDF/actuator **joint position bounds only**. It
-does not apply Placo's arm velocity constraints, manipulability objective,
-posture objective, collision avoidance, or final arm/finger collision gates.
-`--arm-velocity-limit`, `--collision-margin`, and `--collision-trigger` do not
-constrain LeRobot tracking. Positive argument validation still applies.
-MuJoCo's physical joint limits and actuator dynamics remain active.
+Both backends enforce intersected URDF/actuator position bounds and arm
+velocity limits. Velocity bounds use the **previous accepted servo command**,
+not the measured joint position; servo lag cannot enlarge the command step.
+Inactive arms hold their servo commands exactly. Fingers retain independent
+trigger control and bounded speeds.
 
-Clutch release holds the released arm's commands exactly. Engagement starts
-from its measured joints and rebases its filter history. Tracking loss holds
-both arms and resets history. Failed/nonfinite solves retain valid commands
-and history; failed optimizer iterates never enter the filter. Y returns the
-arms directly toward the home joint configuration at `--return-velocity-limit`,
-bounded by URDF velocities, without collision avoidance. Returning home also
-resets the IK history. Outputs drive the existing position actuators; G1's
-gravity feedforward torques are not applied.
+Both backends use the same collision policy: cached exact distance witnesses,
+linearized clearance constraints, nonworsening penetration recovery, and sampled
+checks of motion from both measured joints and previous servo targets to the
+outgoing commands. These checks include held finger targets and passive finger
+couplings. `--arm-velocity-limit`, `--collision-margin`, and
+`--collision-trigger` apply to both methods. The checks use the fitted collision
+primitives and sampled paths; they are not continuous collision detection.
+
+Placo queries its native geometry and solves a QP. LeRobot queries
+Pinocchio/Coal directly and includes the shared constraints in CasADi/IPOPT;
+it never invokes Placo for collision checking or command projection. Its
+constraint capacity grows geometrically when more nearby pairs appear, retaining
+every supplied row. Growth rebuilds the optimizer graph and can add a cold-cycle
+cost. LeRobot retains its G1 tracking objective and filter; Placo retains its
+manipulability and posture objectives.
+
+Clutch engagement rebases the newly active arm from measured joints. Release
+holds it exactly, and tracking loss resets history. A proposal only commits
+filter history after the final arm/finger command check accepts it. Rejected
+proposals retain the last accepted history; a collision rejection resets the
+filter and retries once. Failure holds the previous commands.
+
+Holding Y first tries a bounded joint step toward home. If obstructed, the
+selected backend optimizes a joint-target objective under the same constraints
+and command checks. Return speed is bounded by `--return-velocity-limit`, the
+overall arm cap, and URDF velocity limits. Homing resets filter history. Outputs
+drive the existing position actuators; G1 gravity feedforward torques are not
+applied.
+
+## Backend modules and visualization
+
+The X2 controller uses `xrobotoolkit_teleop/ik/registry.py` to lazily load the
+selected method. The shared request/proposal types and numeric `RobotAdapter`
+protocol live in `ik/types.py`; native objects stay in model adapters and solver
+engines. Both methods use the same composition:
+
+| Layer | Placo | LeRobot |
+| --- | --- | --- |
+| Backend assembly | `placo_backend.py` | `lerobot_backend.py` |
+| Observed model adapter | `placo_model.py` | `pinocchio_model.py` |
+| Solver engine | `placo_solver.py` | `lerobot_solver.py` |
+| Transaction lifecycle | `backend.py:TransactionalBackend` | `backend.py:TransactionalBackend` |
+
+`IKSolver` defines solving, state snapshots, acceptance, reset, and cleanup for
+both engines. The LeRobot engine keeps its G1 objective/filter helper internal
+to the solver module; its backend does not inherit the numerical solver.
+The shared backend validates solver output, restores the observed model and
+accepted solver history after every proposal or failure, and commits the exact
+applied commands only on acceptance. Closing either backend is idempotent and
+prevents further operations. Native solver details are available through the
+backend's solver engine for diagnostics; the controller uses the common API.
+
+Runtime imports are independent. The repository still installs Placo as a base
+dependency for its other robot demos; this change does not reorganize package extras.
+`ik/safety.py` implements the common collision policy. X2 joint names, frames,
+actuator limits, and hand couplings are configured by the controller. Other
+robot demos and RoboJuDo keep their existing implementations.
+
+To add a method:
+
+1. Implement an `IKSolver` engine and numeric `RobotAdapter`, then assemble
+   them with `TransactionalBackend`. Stateless engines inherit the default
+   history hooks; stateful engines implement snapshot, restore, accept, and reset.
+   This supplies the `IKBackend` protocol: `propose`, `accept`, `reject`,
+   `reset(joints=None)`, and `close` with the same lifecycle as existing methods.
+2. Register a lazy `module:factory` in `BACKENDS` with supported capabilities.
+   CLI choices are generated from the registry when the module is imported.
+3. Honor absolute command bounds, hard/soft linear constraints, pose targets,
+   and joint-target homing. Keep proposal history pending until `accept`.
+4. Add adapter parity, command-bound, rejection, collision, and import-isolation
+   tests. A dummy third method already tests selection without controller edits.
+
+`--visualize-ik` opens a shared Meshcat browser view of the accepted model pose,
+end-effector frames, targets, and status for either backend. MuJoCo remains the
+physics viewer. No extra browser server starts in headless operation.
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py --ik-backend lerobot --visualize-ik
+```
+
+## Offline pose-cycle test
+
+Replay default → T pose → default using mock XR input, with either backend:
+
+```bash
+# Headless: JSON report, exit status 0 on success and 1 on a failed check.
+python scripts/misc/test_x2_ik_offline.py --ik-backend placo
+python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --with-omnihand
+
+# Watch the real simulated motion in MuJoCo; optionally add the browser IK view.
+python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --visualize
+python scripts/misc/test_x2_ik_offline.py --ik-backend placo --with-omnihand --visualize --visualize-ik
+```
+
+No headset or XR PC Service is required. The harness replaces the XR client
+before construction, so it never initializes the native XR SDK. A separate
+MuJoCo data instance generates reference hand poses from joint configurations.
+Those poses become native XR positions and XYZW orientations relative to the
+initial clutch references. Both grips stay held, and frame timestamps advance
+once per control cycle. The normal XR mapping, selected IK backend, collision
+checks, command acceptance, servos, and MuJoCo dynamics remain active.
+
+The T reference sets shoulder pitch to zero, shoulder roll to ±1.55 rad, and
+elbows to zero, exercising near-horizontal arms and a straight-elbow endpoint.
+Other joints retain their default reference values; Omnihand fingers remain open.
+Each transition uses a cosine ramp. Defaults are two complete cycles, two
+simulated seconds per transition, and one second of settling at each endpoint.
+Adjust these with `--cycles`, `--move-seconds`, and `--hold-seconds`. Shortening
+the motion or settling time can cause tracking checks to fail.
+
+Checks require finite states and commands, no rejected IK cycles, bounded arm
+command speeds and positions, accurate XR target mapping, and measured endpoint
+clearance above the collision margin. Endpoint hand errors must remain within
+20 mm and 0.10 rad. Repeated visits must agree within 5 mm and 0.02 rad. The
+report includes joint variation separately: redundant arm joint configurations
+can vary while the hand pose remains accurate, especially near the straight-arm
+T pose. Identical joint configurations are not enforced by the hand-pose task.
+
+`--visualize` opens the MuJoCo window with target markers. `--visualize-ik`
+opens the shared browser viewer with accepted commands, end-effector frames,
+targets, and status. Either flag paces the replay at the control period when
+possible; solver overruns make playback slower. Closing the MuJoCo window or
+pressing Ctrl-C stops the replay and releases its resources.
+An interrupted replay exits with status 130, so an incomplete run cannot be
+mistaken for a passing check. Runtime failures produce a JSON error and exit
+with status 1. Browser startup messages go to stderr, keeping the final JSON
+report on stdout.
+
+Run the automated regression, which uses fake windows for visualization checks:
+
+```bash
+X2_TEST_LEROBOT=1 python -m unittest discover -s tests -p test_x2_offline_replay.py -v
+```
+
+It covers both scenes and both installed backends, verifies that no real XR
+client starts, and confirms that a backend which only holds commands fails the
+pose test. LeRobot cases are skipped unless `X2_TEST_LEROBOT=1` is set.
 
 ## Native environment
 
@@ -153,27 +281,41 @@ can exceed one 50 Hz period; use the measured results for the selected scene.
 
 Validated on 2026-11-10 on an Intel Core i9-14900HX with Python 3.10.22,
 NumPy 2.2.6, Placo 0.11.0, Pinocchio 4.1.0, and Conda CasADi 3.6.7.
-Both native import orders and an IPOPT smoke solve passed. After review, the
-installed `xr-robotics` environment passed **123 tests**, including all optional
-tests, in 127.7 seconds. Asset regeneration checks compare XML structure and
-identifiers exactly, with an absolute `1e-12` tolerance for computed geometry
-and inertia values to accommodate floating-point serialization differences.
+Both native import orders and an IPOPT smoke solve passed. The full suite passed
+**162 tests in 363.1 seconds** with `X2_TEST_LEROBOT=1` after aligning the backend structures.
+The final scalar-command and snapshot-isolation cleanup also passed all
+36 backend contract tests and six offline replay tests. The optional suite
+covers independent backend imports with the other solver blocked, collision
+adapter distances/placements/Jacobians, command bounds despite servo lag,
+penetration recovery, rejected proposals without filter-history commits,
+obstructed homing with servo dynamics, shared renderer assets and cleanup,
+URDF limit validation, large-quaternion normalization, and offline pose cycles
+with interruption/nonfinite-state failures. Shared lifecycle tests also verify
+proposal/failure rollback, exact applied-command acceptance, and closed-backend
+behavior for both methods. Asset
+regeneration checks compare XML structure and identifiers exactly, with an
+absolute `1e-12` tolerance for computed geometry and inertia values.
 
-The following initial replay used 200 control cycles at a simulated 50 Hz, with the
+The following replay used 200 control cycles at a simulated 50 Hz, with the
 same position/orientation trajectory for each backend. Timing includes physics
 and command processing; setup and the first cycle are excluded from these
 percentiles. [Full measurements](lerobot_ik_benchmark.json) include cold-cycle
 cost, orientation error, and maximum commanded joint steps.
 
-| Backend | Model | Median cycle | p95 cycle | Max cycle | Mean position error |
-| --- | --- | ---: | ---: | ---: | ---: |
-| placo | Arms | 3.50 ms | 3.65 ms | 4.86 ms | 3.66 mm |
-| placo | Omnihand | 7.11 ms | 9.32 ms | 17.72 ms | 5.85 mm |
-| lerobot | Arms | 4.10 ms | 4.81 ms | 5.06 ms | 7.99 mm |
-| lerobot | Omnihand | 4.79 ms | 5.22 ms | 5.65 ms | 9.83 mm |
+| Backend | Model | Median cycle | p95 cycle | Max cycle | Mean position error | Cycles >20 ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| placo | Arms | 5.42 ms | 5.64 ms | 16.28 ms | 3.66 mm | 0/200 |
+| placo | Omnihand | 13.97 ms | 24.28 ms | 25.41 ms | 5.85 mm | 19/200 |
+| lerobot | Arms | 13.31 ms | 16.25 ms | 26.63 ms | 7.99 mm | 2/200 |
+| lerobot | Omnihand | 26.11 ms | 35.83 ms | 39.91 ms | 9.83 mm | 200/200 |
 
-All four replays completed with zero failed cycles and zero steady-state
-20 ms overruns. LeRobot had larger position error in this replay. The comparison
-includes differences in optimization, filtering, and simulated servo tracking.
+All four replays completed with zero failed cycles. The LeRobot Omnihand replay
+exceeded the 20 ms period on every cycle; selecting 50 Hz does not guarantee
+that rate. Placo Omnihand and LeRobot arms also had occasional overruns.
+These timings include the newly enabled shared collision checks and velocity
+bounds. They replace the earlier measurements that omitted those protections
+for LeRobot. First-cycle costs and optimizer graph growth can add further delay.
+LeRobot had larger position error in this replay. The comparison includes
+optimization, filtering, collision checks, and simulated servo tracking.
 These measurements cover this synthetic trajectory and the bundled scenes;
 they do not establish timing or tracking performance for every target.

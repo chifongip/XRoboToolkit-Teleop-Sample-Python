@@ -10,7 +10,7 @@ import mujoco
 import numpy as np
 
 from test_agibot_x2_simulation import ASSETS, FakeXR
-from xrobotoolkit_teleop.common.lerobot_ik import LeRobotIKBackend
+from xrobotoolkit_teleop.ik.lerobot_solver import G1IKSolver
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
 
 
@@ -18,30 +18,31 @@ class BackendSelectionTests(unittest.TestCase):
     def test_default_backend_does_not_load_optional_dependencies(self):
         with (
             patch(
-                "xrobotoolkit_teleop.common.lerobot_ik.load_dependencies", side_effect=AssertionError("optional import")
+                "xrobotoolkit_teleop.ik.lerobot_solver.load_dependencies",
+                side_effect=AssertionError("optional import"),
             ),
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", FakeXR),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", FakeXR),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             c = AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"))
-        self.addCleanup(c.xr_client.close)
+        self.addCleanup(c.close)
         self.assertEqual(c.ik_backend, "placo")
-        self.assertIsNone(c.lerobot_ik)
+        self.assertEqual(c.backend.__class__.__name__, "PlacoBackend")
         self.assertIsNotNone(c.collision_checker)
 
     def test_invalid_backend_fails_before_xr_connection(self):
-        with patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr:
+        with patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr:
             with self.assertRaisesRegex(ValueError, "ik_backend"):
                 AgibotX2TeleopController("unused", "unused", ik_backend="unknown")
             xr.assert_not_called()
 
     def test_missing_dependencies_fail_before_xr_connection(self):
         with (
-            patch("xrobotoolkit_teleop.common.lerobot_ik.load_dependencies", side_effect=ImportError("test")),
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+            patch("xrobotoolkit_teleop.ik.lerobot_solver.load_dependencies", side_effect=ImportError("test")),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr,
         ):
             with self.assertRaises(ImportError):
-                AgibotX2TeleopController("unused", "unused", ik_backend="lerobot")
+                AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), ik_backend="lerobot")
             xr.assert_not_called()
 
 
@@ -50,33 +51,38 @@ class LeRobotIKTests(unittest.TestCase):
     def make_controller(self, omnihand=False, **kwargs):
         stem, scene = ("x2_omnihand_ik", "scene_omnihand") if omnihand else ("x2_fixed", "scene")
         with (
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", FakeXR),
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", FakeXR),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             c = AgibotX2TeleopController(
                 str(ASSETS / f"{scene}.xml"), str(ASSETS / f"{stem}.urdf"), ik_backend="lerobot", **kwargs
             )
-        self.addCleanup(c.xr_client.close)
-        self.addCleanup(c.lerobot_ik.close)
+        self.addCleanup(c.close)
         c.xr_client.grips.update(left_trigger=0.0, right_trigger=0.0)
         return c
 
-    def inputs(self, c):
-        measured = {name: c.placo_robot.get_joint(name) for name in c.arm_actuators.values()}
-        return measured, c.lerobot_ik.forward_kinematics(measured)
+    def math_solver(self, c):
+        solver = G1IKSolver(c.robot_urdf_path, c.backend.spec.joints, c.position_limits)
+        self.addCleanup(solver.close)
+        return solver
+
+    def inputs(self, c, solver):
+        measured = {name: c.robot.get_joint(name) for name in c.arm_actuators.values()}
+        return measured, solver.forward_kinematics(measured)
 
     def test_fk_matches_both_mujoco_models_and_joint_order(self):
         for omni in (False, True):
             with self.subTest(omnihand=omni):
                 c = self.make_controller(omni)
-                measured, _ = self.inputs(c)
+                solver = self.math_solver(c)
+                measured, _ = self.inputs(c, solver)
                 rng = np.random.default_rng(42)
                 for _ in range(10):
                     for name in measured:
                         measured[name] += rng.uniform(-0.03, 0.03)
                         c.mj_data.qpos[c.mj_model.joint(name).qposadr[0]] = measured[name]
                     mujoco.mj_forward(c.mj_model, c.mj_data)
-                    for side, pose in c.lerobot_ik.forward_kinematics(measured).items():
+                    for side, pose in solver.forward_kinematics(measured).items():
                         body = c.mj_data.body(f"{side}_hand_center")
                         np.testing.assert_allclose(pose[:3, 3], body.xpos, atol=1e-5)
                         np.testing.assert_allclose(pose[:3, :3], body.xmat.reshape(3, 3), atol=1e-5)
@@ -87,8 +93,8 @@ class LeRobotIKTests(unittest.TestCase):
         from scipy.optimize import least_squares
 
         c = self.make_controller()
-        backend = c.lerobot_ik
-        measured, targets = self.inputs(c)
+        backend = self.math_solver(c)
+        measured, targets = self.inputs(c, backend)
         targets["left"][0, 3] += 0.02
         targets["right"][2, 3] += 0.01
         seed = backend._vector(measured)
@@ -113,7 +119,7 @@ class LeRobotIKTests(unittest.TestCase):
             name: (backend.lower[index], backend.upper[index])
             for name, index in zip(backend.joint_names, backend.indices)
         }
-        reordered = LeRobotIKBackend(c.robot_urdf_path, list(reversed(backend.joint_names)), limits)
+        reordered = G1IKSolver(c.robot_urdf_path, list(reversed(backend.joint_names)), limits)
         self.addCleanup(reordered.close)
         result = reordered.solve(measured, measured, targets, {"left_arm": True, "right_arm": True})
         for name in actual:
@@ -121,8 +127,8 @@ class LeRobotIKTests(unittest.TestCase):
 
     def test_filter_failure_and_reset(self):
         c = self.make_controller()
-        b = c.lerobot_ik
-        measured, targets = self.inputs(c)
+        b = self.math_solver(c)
+        measured, targets = self.inputs(c, b)
         seed = b._vector(measured)
         active = {"left_arm": True, "right_arm": True}
         samples = [seed + offset for offset in (0.0, 0.01, 0.02, 0.03)]
@@ -151,8 +157,8 @@ class LeRobotIKTests(unittest.TestCase):
 
     def test_inactive_arm_and_joint_bounds_with_unreachable_target(self):
         c = self.make_controller()
-        b = c.lerobot_ik
-        measured, targets = self.inputs(c)
+        b = self.math_solver(c)
+        measured, targets = self.inputs(c, b)
         targets["left"][0, 3] += 10
         try:
             result = b.solve(measured, measured, targets, {"left_arm": True, "right_arm": False})
@@ -168,16 +174,16 @@ class LeRobotIKTests(unittest.TestCase):
     def test_missing_ipopt_is_reported_before_xr_connection(self):
         with (
             patch("casadi.has_nlpsol", return_value=False),
-            patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient") as xr,
+            patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient") as xr,
         ):
             with self.assertRaisesRegex(ImportError, "IPOPT"):
-                AgibotX2TeleopController("unused", "unused", ik_backend="lerobot")
+                AgibotX2TeleopController(str(ASSETS / "scene.xml"), str(ASSETS / "x2_fixed.urdf"), ik_backend="lerobot")
             xr.assert_not_called()
 
     def test_reengagement_rebases_only_the_changed_arm_filter(self):
         c = self.make_controller()
-        b = c.lerobot_ik
-        measured, targets = self.inputs(c)
+        b = self.math_solver(c)
+        measured, targets = self.inputs(c, b)
         seed = b._vector(measured)
         left = np.array([i for n, i in zip(b.joint_names, b.indices) if n.startswith("left_")])
         right = np.array([i for n, i in zip(b.joint_names, b.indices) if n.startswith("right_")])
@@ -204,8 +210,8 @@ class LeRobotIKTests(unittest.TestCase):
 
     def test_reengagement_rebases_after_a_failed_release_solve(self):
         c = self.make_controller()
-        b = c.lerobot_ik
-        measured, targets = self.inputs(c)
+        b = self.math_solver(c)
+        measured, targets = self.inputs(c, b)
         active = {"left_arm": True, "right_arm": True}
         seed = b._vector(measured)
         for offset in (0, 0.01, 0.02, 0.03):
@@ -233,25 +239,25 @@ class LeRobotIKTests(unittest.TestCase):
             if name.startswith("left_"):
                 self.assertAlmostEqual(result[name], changed[name])
 
-    def test_controller_bypasses_placo_collision_and_speed_gates(self):
+    def test_controller_enforces_collision_and_speed_limits(self):
         for omni in (False, True):
             with self.subTest(omnihand=omni):
-                c = self.make_controller(omni, arm_velocity_limit=0.0001)
+                c = self.make_controller(omni, arm_velocity_limit=0.05)
                 c.xr_client.grips["left_grip"] = 1.0
                 c.step_control()
                 held = c.mj_data.ctrl.copy()
                 c.xr_client.poses["left_controller"][2] -= 0.03
-                with (
-                    patch.object(c.solver, "solve", side_effect=AssertionError("Placo tracking called")),
-                    patch.object(c, "_validate_collision_motion", side_effect=AssertionError("collision gate called")),
-                    patch.object(c, "_validate_combined_commands", side_effect=AssertionError("combined gate called")),
-                ):
-                    c.step_control()
-                self.assertTrue(c._ik_valid)
-                self.assertGreater(np.max(np.abs(c.mj_data.ctrl - held)), 0.0001 * c.dt)
-                for i, name in c.arm_actuators.items():
-                    if name.startswith("right_"):
-                        self.assertEqual(c.mj_data.ctrl[i], held[i])
+                with patch.object(c, "_validate_collision_motion", wraps=c._validate_collision_motion) as check:
+                    for _ in range(3):
+                        previous = c.mj_data.ctrl.copy()
+                        c.step_control()
+                        self.assertTrue(c._ik_valid, c.status)
+                        for i, name in c.arm_actuators.items():
+                            self.assertLessEqual(abs(c.mj_data.ctrl[i] - previous[i]), 0.05 * c.dt + 1e-9)
+                            if name.startswith("right_"):
+                                self.assertEqual(c.mj_data.ctrl[i], held[i])
+                    self.assertGreater(check.call_count, 0)
+                self.assertGreater(np.max(np.abs(c.mj_data.ctrl - held)), 1e-6)
 
     def test_release_tracking_loss_failure_and_home(self):
         c = self.make_controller()
@@ -261,14 +267,14 @@ class LeRobotIKTests(unittest.TestCase):
         c.step_control()
         held = c.mj_data.ctrl.copy()
         for failure in (RuntimeError("test failure"), ValueError("invalid target")):
-            with patch.object(c.lerobot_ik, "solve", side_effect=failure):
+            with patch.object(c.backend, "propose", side_effect=failure):
                 c.step_control()
             self.assertFalse(c._ik_valid)
             np.testing.assert_array_equal(c.mj_data.ctrl, held)
         with patch.object(c, "_xr_stream_is_fresh", return_value=False):
             c.step_control()
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
-        self.assertIsNone(c.lerobot_ik._previous)
+        self.assertIsNone(c.backend.solver._previous)
         c.xr_client.grips["left_grip"] = 0.0
         c.step_control()
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
@@ -278,7 +284,7 @@ class LeRobotIKTests(unittest.TestCase):
             c.step_control()
             self.assertLessEqual(np.max(np.abs(c.mj_data.ctrl - before)), c.return_velocity_limit * c.dt + 1e-9)
         np.testing.assert_allclose(c.mj_data.ctrl, c.mj_model.key("home").ctrl, atol=1e-7)
-        self.assertIsNone(c.lerobot_ik._previous)
+        self.assertIsNone(c.backend.solver._previous)
 
 
 if __name__ == "__main__":

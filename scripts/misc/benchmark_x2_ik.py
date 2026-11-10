@@ -5,12 +5,12 @@ import io
 import json
 import time
 from pathlib import Path
-from typing import Literal
 from unittest.mock import patch
 
 import numpy as np
 import tyro
 from meshcat import transformations as tf
+from xrobotoolkit_teleop.ik import BackendName
 
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
@@ -41,14 +41,15 @@ class ReplayXR:
         pass
 
 
-def main(ik_backend: Literal["placo", "lerobot"] = "placo", with_omnihand: bool = False, steps: int = 200):
+def main(ik_backend: BackendName = BackendName.placo, with_omnihand: bool = False, steps: int = 200):
+    ik_backend = getattr(ik_backend, "value", ik_backend)
     if steps < 4:
         raise ValueError("steps must be at least 4")
     assets = Path(ASSET_PATH) / "agibot/x2"
     scene, urdf = ("scene_omnihand.xml", "x2_omnihand_ik.urdf") if with_omnihand else ("scene.xml", "x2_fixed.urdf")
     setup_started = time.perf_counter()
     with (
-        patch("xrobotoolkit_teleop.common.base_teleop_controller.XrClient", ReplayXR),
+        patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", ReplayXR),
         contextlib.redirect_stdout(io.StringIO()),
     ):
         controller = AgibotX2TeleopController(str(assets / scene), str(assets / urdf), ik_backend=ik_backend)
@@ -102,9 +103,7 @@ def main(ik_backend: Literal["placo", "lerobot"] = "placo", with_omnihand: bool 
             )
         )
     finally:
-        if controller.lerobot_ik is not None:
-            controller.lerobot_ik.close()
-        controller.xr_client.close()
+        controller.close()
 
 
 if __name__ == "__main__":
