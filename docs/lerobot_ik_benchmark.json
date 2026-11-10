@@ -1,0 +1,94 @@
+[
+  {
+    "backend": "placo",
+    "omnihand": false,
+    "steps": 200,
+    "setup_ms": 463.3333331439644,
+    "first_cycle_ms": 3.5578079987317324,
+    "cycle_ms": {
+      "median": 3.498403588309884,
+      "p95": 3.649770433548838,
+      "max": 4.863722017034888
+    },
+    "cycles_over_20ms": 0,
+    "failed_cycles": 0,
+    "position_error_m": {
+      "mean": 0.0036592733032834945,
+      "max": 0.004789291101335824
+    },
+    "orientation_error_rad": {
+      "mean": 0.01822973331055309,
+      "max": 0.032340534244603425
+    },
+    "max_arm_command_step_rad": 0.0071466920172562065
+  },
+  {
+    "backend": "placo",
+    "omnihand": true,
+    "steps": 200,
+    "setup_ms": 528.9774851407856,
+    "first_cycle_ms": 8.233736036345363,
+    "cycle_ms": {
+      "median": 7.108474033884704,
+      "p95": 9.320077463053165,
+      "max": 17.716930015012622
+    },
+    "cycles_over_20ms": 0,
+    "failed_cycles": 0,
+    "position_error_m": {
+      "mean": 0.0058525220426874905,
+      "max": 0.007724866536703466
+    },
+    "orientation_error_rad": {
+      "mean": 0.027066118529239337,
+      "max": 0.04381633450050807
+    },
+    "max_arm_command_step_rad": 0.007426948625492452
+  },
+  {
+    "backend": "lerobot",
+    "omnihand": false,
+    "steps": 200,
+    "setup_ms": 550.25515682064,
+    "first_cycle_ms": 11.741074966266751,
+    "cycle_ms": {
+      "median": 4.101556492969394,
+      "p95": 4.814064817037433,
+      "max": 5.064343102276325
+    },
+    "cycles_over_20ms": 0,
+    "failed_cycles": 0,
+    "position_error_m": {
+      "mean": 0.007986392332285522,
+      "max": 0.010754592334774656
+    },
+    "orientation_error_rad": {
+      "mean": 0.02499636827727926,
+      "max": 0.042483616634907
+    },
+    "max_arm_command_step_rad": 0.020609302739243995
+  },
+  {
+    "backend": "lerobot",
+    "omnihand": true,
+    "steps": 200,
+    "setup_ms": 678.7530200090259,
+    "first_cycle_ms": 13.050724053755403,
+    "cycle_ms": {
+      "median": 4.785929340869188,
+      "p95": 5.222520814277231,
+      "max": 5.6500600185245275
+    },
+    "cycles_over_20ms": 0,
+    "failed_cycles": 0,
+    "position_error_m": {
+      "mean": 0.009833919642379813,
+      "max": 0.012591146142573855
+    },
+    "orientation_error_rad": {
+      "mean": 0.026426156956265805,
+      "max": 0.04132805779967873
+    },
+    "max_arm_command_step_rad": 0.02093719173713382
+  }
+]

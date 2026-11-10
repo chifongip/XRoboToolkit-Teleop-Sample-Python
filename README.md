@@ -167,6 +167,10 @@ python scripts/simulation/teleop_dual_piper_mujoco.py
 
 ### Agibot X2 fixed-base dual-arm simulation
 
+The optional `--ik-backend lerobot` selects LeRobot's G1-style nonlinear IK
+adapted to X2. Placo remains the default. See the [backend setup and behavior](docs/lerobot_ik.md)
+for native dependencies, joint-only tracking limits, and headless comparisons.
+
 Activate the installed environment (for example, `conda activate xr-robotics`),
 start XRoboToolkit PC Service, and connect the headset and two VR controllers:
 
@@ -233,12 +237,15 @@ The demo defaults to **50 Hz** control (20 ms per cycle). Set the target rate wi
 python scripts/simulation/teleop_agibot_x2_mujoco.py --with-omnihand --control-frequency 100
 ```
 
-IK integration, per-cycle command speed limits, and loop pacing use the configured
+Loop pacing and Placo's IK integration and command speed limits use the configured
 period. Physics steps are at most 1 ms in the bundled scenes; rates such as 60 Hz
 use slightly smaller steps so each cycle advances exactly one control period.
 Collision checks can overrun the target period.
 
-X2 IK reuses the baseline query's exact collision witnesses to build the same
+The following arm speed and collision details apply to the default `placo`
+backend. The `lerobot` backend uses the [joint-bounded behavior described here](docs/lerobot_ik.md).
+
+Placo IK reuses the baseline query's exact collision witnesses to build the same
 linearized clearance constraints for nearby pairs. This avoids a second full
 distance query inside the solver. Joint limits, velocity limits, penetration
 recovery, and nonlinear command-path checks remain enabled.
@@ -250,7 +257,7 @@ With Omnihand Pro, `--hand-velocity-limit` separately caps actuated finger targe
 speeds (rad/s; default 2.0), also bounded by each joint's supplied hand URDF limit.
 The former `--velocity-limit` option is now `--arm-velocity-limit`.
 
-Self-collision avoidance is enabled for both X2 modes. Placo uses fitted cylinders
+With Placo, self-collision avoidance is enabled for both X2 models. Placo uses fitted cylinders
 and compact boxes for the body and arms, with rounded torso sections. Each
 Omnihand preserves its bundled URDF joint chains and collision primitives, updated
 from all measured finger joints, including passive coupled joints.

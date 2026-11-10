@@ -43,7 +43,12 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
         collision_trigger=DEFAULTS.collision_trigger,
         control_frequency=DEFAULTS.control_frequency,
         return_velocity_limit=DEFAULTS.return_velocity_limit,
+        ik_backend="placo",
     ):
+        if ik_backend not in ("placo", "lerobot"):
+            raise ValueError("ik_backend must be placo or lerobot")
+        self.ik_backend = ik_backend
+        self.lerobot_ik = None
         if not np.isfinite(control_frequency) or control_frequency <= 0:
             raise ValueError("control_frequency must be finite and positive")
         control_dt = 1.0 / control_frequency
@@ -66,6 +71,10 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             raise ValueError("collision_trigger must be finite and greater than collision_margin")
         self.collision_margin = collision_margin
         self.collision_trigger = collision_trigger
+        if ik_backend == "lerobot":
+            from xrobotoolkit_teleop.common.lerobot_ik import load_dependencies
+
+            load_dependencies()
         config = {
             f"{side}_arm": {
                 "link_name": f"{side}_hand_center",
@@ -92,6 +101,8 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             self._last_xr_timestamp_ns = self.xr_client.get_timestamp_ns()
             self._last_xr_update_at = None
         except Exception:
+            if self.lerobot_ik is not None:
+                self.lerobot_ik.close()
             if hasattr(self, "xr_client"):
                 self.xr_client.close()
             raise
@@ -220,6 +231,18 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                     "MuJoCo and IK hand-center frames do not match; Omnihand Pro requires x2_omnihand_ik.urdf"
                 )
         self.sync_end_effector_poses_to_placo_tasks()
+        if self.ik_backend == "lerobot":
+            from xrobotoolkit_teleop.common.lerobot_ik import LeRobotIKBackend
+
+            limits = {name: tuple(self.mj_model.actuator_ctrlrange[i]) for i, name in self.arm_actuators.items()}
+            self.lerobot_ik = LeRobotIKBackend(self.robot_urdf_path, list(self.arm_actuators.values()), limits)
+            measured = {name: self.placo_robot.get_joint(name) for name in arm_names}
+            for side, pose in self.lerobot_ik.forward_kinematics(measured).items():
+                expected = self.placo_robot.get_T_world_frame(f"{side}_hand_center")
+                if not np.allclose(pose, expected, atol=1e-5, rtol=0):
+                    raise ValueError("LeRobot and X2 hand-center frames do not match")
+            self._update_mocap_target()
+            return
         for name, task in self.effector_task.items():
             # Favor hand-center tracking over the generic manipulability objective.
             task.configure(name, "soft", 10.0)
@@ -297,7 +320,8 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
 
     def _update_ik(self):
         self._update_robot_state()
-        self.collision_checker.clear_cache()
+        if self.ik_backend == "placo":
+            self.collision_checker.clear_cache()
         self._ik_valid = False
         stream_fresh = self._xr_stream_is_fresh()
         self._stream_fresh = stream_fresh
@@ -345,8 +369,25 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             # invalid cycle. Recovery rebases each hand center at its measured pose.
             for name in self.manipulator_config:
                 self._reset_clutch_reference(name)
+            if self.lerobot_ik is not None:
+                self.lerobot_ik.reset()
             return
         if not any_active:
+            if self.lerobot_ik is not None:
+                self.lerobot_ik.reset()
+            return
+        if self.lerobot_ik is not None:
+            measured = {name: self.placo_robot.get_joint(name) for name in self.arm_actuators.values()}
+            previous = {name: float(self.mj_data.ctrl[i]) for i, name in self.arm_actuators.items()}
+            targets = {side: self.effector_task[f"{side}_arm"].T_world_frame for side in ("left", "right")}
+            try:
+                solution = self.lerobot_ik.solve(measured, previous, targets, self.active)
+                for name, value in solution.items():
+                    self.placo_robot.set_joint(name, value)
+                self.placo_robot.update_kinematics()
+                self._ik_valid = True
+            except (RuntimeError, ValueError) as exc:
+                print(f"X2 LeRobot IK failed; holding previous commands: {exc}")
             return
         previous = self.placo_robot.state.q.copy()
         recovery_constraint = None
@@ -386,7 +427,9 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 self.solver.remove_constraint(recovery_constraint)
 
     def _update_return_to_default(self, stream_fresh):
-        """Hold Y to approach the home keyframe through checked joint steps."""
+        """Approach home at a bounded target speed, with Placo collision checks when selected."""
+        if self.lerobot_ik is not None:
+            self.lerobot_ik.reset()
         for name in self.manipulator_config:
             self.active[name] = True
             self._reset_clutch_reference(name)
@@ -413,11 +456,12 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                 bounds[joint] = (lower, upper)
                 target = home[self.mj_model.joint(joint).qposadr[0]]
                 self.placo_robot.set_joint(joint, np.clip(target, lower, upper))
-            try:
-                self._validate_collision_motion(previous)
-            except RuntimeError:
-                self.placo_robot.state.q = previous.copy()
-                self._solve_return_avoidance(previous, home, bounds)
+            if self.ik_backend == "placo":
+                try:
+                    self._validate_collision_motion(previous)
+                except RuntimeError:
+                    self.placo_robot.state.q = previous.copy()
+                    self._solve_return_avoidance(previous, home, bounds)
             self._ik_valid = True
         except RuntimeError as exc:
             self.placo_robot.state.q = previous
@@ -626,7 +670,11 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
                     # fingers that have not caught up during trigger reversals.
                     fraction = min(1.0, np.min(max_delta[moving] / np.abs(delta[moving])))
                     self.mj_data.ctrl[indices] += fraction * delta
-        if self.hand_command_offsets and not np.array_equal(self.mj_data.ctrl, previous_commands):
+        if (
+            self.ik_backend == "placo"
+            and self.hand_command_offsets
+            and not np.array_equal(self.mj_data.ctrl, previous_commands)
+        ):
             self._validate_combined_commands(previous_commands)
         if self.visualize_placo:
             self._update_placo_viz()
@@ -696,4 +744,6 @@ class AgibotX2TeleopController(X2CollisionMixin, MujocoTeleopController):
             pass
         finally:
             self._stop_event.set()
+            if self.lerobot_ik is not None:
+                self.lerobot_ik.close()
             self.xr_client.close()

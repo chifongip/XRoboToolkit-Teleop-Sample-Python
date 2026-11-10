@@ -174,9 +174,43 @@ class X2OmnihandProTests(unittest.TestCase):
         )
         for name, root in documents.items():
             with self.subTest(file=name):
-                self.assertEqual(
-                    ET.tostring(root, encoding="utf-8", xml_declaration=True), (ASSETS / name).read_bytes()
+                self.assert_xml_matches(root, ET.parse(ASSETS / name).getroot())
+
+    def assert_xml_matches(self, actual, expected):
+        """Compare structure exactly and computed geometry within roundoff."""
+        self.assertEqual(actual.tag, expected.tag)
+        self.assertEqual(actual.attrib.keys(), expected.attrib.keys())
+        self.assertEqual((actual.text or "").strip(), (expected.text or "").strip())
+        # Computed poses/inertias can differ in the last bit across BLAS builds.
+        # Identifiers, flags, joint limits, and mesh paths still compare exactly.
+        numeric = {"xyz", "rpy", "pos", "quat", "fullinertia", "diaginertia", "size", "radius", "length", "mass"}
+        for name, value in actual.attrib.items():
+            other = expected.attrib[name]
+            if value == other:
+                continue
+            if name in numeric:
+                self.assertEqual(len(value.split()), len(other.split()))
+                np.testing.assert_allclose(
+                    [float(v) for v in value.split()], [float(v) for v in other.split()], rtol=0, atol=1e-12
                 )
+            else:
+                self.assertEqual(value, other)
+        self.assertEqual(len(actual), len(expected))
+        for child, expected_child in zip(actual, expected):
+            self.assert_xml_matches(child, expected_child)
+
+    def test_generated_xml_comparison_rejects_geometry_and_structure_changes(self):
+        expected = ET.fromstring('<link name="arm"><origin xyz="0.1 0 0"/></link>')
+        rounded = ET.fromstring('<link name="arm"><origin xyz="0.10000000000000002 0 0"/></link>')
+        self.assert_xml_matches(rounded, expected)
+        for changed in (
+            '<link name="arm"><origin xyz="0.100001 0 0"/></link>',
+            '<link name="other"><origin xyz="0.1 0 0"/></link>',
+            '<link name="arm"><origin xyz="0.1 0"/></link>',
+            '<link name="arm"/>',
+        ):
+            with self.subTest(xml=changed), self.assertRaises(AssertionError):
+                self.assert_xml_matches(ET.fromstring(changed), expected)
 
     def test_urdf_inertia_rotation(self):
         link = ET.fromstring(
