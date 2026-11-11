@@ -4,7 +4,8 @@ import logging
 import math
 import time
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from numbers import Real
 
 import numpy as np
 from meshcat import transformations as tf
@@ -20,12 +21,24 @@ from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD
 logger = logging.getLogger(__name__)
 
 
+def _float32_bounds(lower, upper):
+    """Round admissible intervals inward before narrowing checked commands."""
+    lower, upper = np.asarray(lower, dtype=float), np.asarray(upper, dtype=float)
+    low32, high32 = lower.astype(np.float32), upper.astype(np.float32)
+    low32 = np.where(low32.astype(float) < lower, np.nextafter(low32, np.float32(np.inf)), low32)
+    high32 = np.where(high32.astype(float) > upper, np.nextafter(high32, np.float32(-np.inf)), high32)
+    if np.any(low32 > high32):
+        raise RuntimeError("command bounds contain no float32 target")
+    return low32, high32
+
+
 @dataclass
 class XRFrame:
     timestamp_ns: int
     poses: dict
     grips: dict
     return_to_default: bool = False
+    triggers: dict = field(default_factory=dict)
 
 
 class ExternalStateRetargeter(CollisionPolicy):
@@ -56,6 +69,17 @@ class ExternalStateRetargeter(CollisionPolicy):
                 raise ValueError("Profile observed joints do not match the model")
             for frame in [self.profile.reference_frame, *self.profile.spec.frames.values()]:
                 self.robot.get_T_world_frame(frame)
+            hands = self.profile.hands
+            self.hand_names = [] if hands is None else list(hands.active)
+            self.command_names = [*self.arm_names, *self.hand_names]
+            self.hand_couplings = (
+                []
+                if hands is None
+                else [
+                    (self.robot.get_joint_offset(target), self.robot.get_joint_offset(source), np.array(coefficients))
+                    for target, source, coefficients in hands.couplings
+                ]
+            )
             self.limits = self.profile.spec.limits.copy()
             self.velocities = self.profile.velocities.copy()
             self.tasks = {
@@ -109,12 +133,13 @@ class ExternalStateRetargeter(CollisionPolicy):
             self.backend.reset()
             return False
         if self._pending is not None:
-            self.backend.accept(self._pending, positions)
+            self.backend.accept(self._pending, {n: positions[n] for n in self.arm_names})
         self._pending = None
         self._pending_positions = None
         return True
 
     def _output(self, candidate):
+        self._checked_configuration = candidate.copy()
         positions = self._positions(candidate)
         self._pending_positions = positions.copy()
         return positions
@@ -226,13 +251,20 @@ class ExternalStateRetargeter(CollisionPolicy):
                 robot.state.q = start
                 distances = self.collision_checker.distances()
                 floor = np.minimum(np.minimum(distances, measured_distances), self.collision_margin)
-                for configuration in self._collision_motion_samples(start, candidate, False):
+                for configuration in self._collision_motion_samples(start, candidate, bool(self.hand_couplings)):
                     robot.state.q = configuration
                     values = self.collision_checker.clearance_bounds(floor) if np.all(floor > 0) else None
                     if values is None or np.any(values < floor):
                         values = self.collision_checker.distances()
-                    if np.any(values < floor - 1e-6):
-                        raise RuntimeError("Robot command path violates self-collision clearance")
+                    rejected = np.flatnonzero(values < floor - 1e-6)
+                    if rejected.size:
+                        index = rejected[0]
+                        a, b = self.collision_checker.pair_indices[index]
+                        objects = robot.collision_model.objects
+                        raise RuntimeError(
+                            "Robot command path violates self-collision clearance "
+                            f"({objects[a].link} vs {objects[b].link})"
+                        )
                     floor = np.maximum(floor, np.minimum(values, self.collision_margin))
                 violating = measured_distances < self.collision_margin - 1e-6
                 if (
@@ -252,11 +284,150 @@ class ExternalStateRetargeter(CollisionPolicy):
         default_positions,
         position_limits,
         *,
+        hand_velocity_limit=None,
+        **kwargs,
+    ):
+        if self._closed:
+            raise RuntimeError("Retargeter is closed")
+        if not self.hand_names:
+            return self._step_arms(measured_positions, previous_targets, default_positions, position_limits, **kwargs)
+        self.reject()
+        if any(
+            set(payload) != set(self.command_names)
+            for payload in (previous_targets, default_positions, position_limits)
+        ):
+            raise ValueError("combined targets/defaults/limits must cover arms and active fingers")
+
+        hands = self.profile.hands
+        for name in self.hand_names:
+            lower, upper = position_limits[name]
+            if not np.isfinite([lower, upper, previous_targets[name], default_positions[name]]).all():
+                raise ValueError("finger limits and targets must be finite")
+            lower, upper = max(lower, hands.limits[name][0]), min(upper, hands.limits[name][1])
+            if lower > upper or not lower <= previous_targets[name] <= upper:
+                raise ValueError(f"finger baseline is outside compatible limits: {name}")
+
+        def subset(values):
+            return {n: values[n] for n in self.arm_names}
+
+        proposal = self._step_arms(
+            measured_positions,
+            subset(previous_targets),
+            subset(default_positions),
+            subset(position_limits),
+            held_finger_targets={n: previous_targets[n] for n in self.hand_names},
+            **kwargs,
+        )
+        arms_checked = proposal is not None
+        if not arms_checked:
+            frame = kwargs.get("frame")
+            if kwargs.get("intent") != "TRACK" or frame is None or frame.return_to_default or not self._fresh(frame):
+                return None
+            # Grips clutch arms only. Fresh triggers can move fingers even when
+            # no arm is engaged or the arm solver cannot produce a safe step.
+            for name in self.arm_names:
+                lower = max(position_limits[name][0], self.limits[name][0])
+                upper = min(position_limits[name][1], self.limits[name][1])
+                if not lower <= previous_targets[name] <= upper:
+                    return None
+            proposal = subset(previous_targets)
+            self.status = "tracking"
+            self.hold_reason = None
+        robot = self.robot
+        saved = robot.state.q.copy()
+        try:
+            for n, value in measured_positions.items():
+                robot.set_joint(n, value)
+            measured = robot.state.q.copy()
+            previous = measured.copy()
+            for n in self.command_names:
+                previous[robot.get_joint_offset(n)] = previous_targets[n]
+            self._project_hands(previous)
+            candidate = previous.copy()
+            for n, value in proposal.items():
+                candidate[robot.get_joint_offset(n)] = value
+            held = candidate.copy()
+            dt = kwargs.get("control_dt") or 1 / self.settings.control_frequency
+            cap = self.settings.hand_velocity_limit
+            if hand_velocity_limit is not None:
+                if (
+                    isinstance(hand_velocity_limit, bool)
+                    or not isinstance(hand_velocity_limit, Real)
+                    or not np.isfinite(hand_velocity_limit)
+                    or hand_velocity_limit <= 0
+                ):
+                    raise ValueError("invalid hand velocity cap")
+                cap = min(cap, hand_velocity_limit)
+            if self.status == "tracking":
+                frame = kwargs.get("frame")
+                for side, names in hands.groups.items():
+                    trigger = frame.triggers.get(side, float("nan"))
+                    if isinstance(trigger, bool) or not isinstance(trigger, Real) or not np.isfinite(trigger):
+                        self.hold_reason = f"{side} fingers held: invalid trigger value"
+                        continue
+                    trigger = float(np.clip(trigger, 0, 1))
+                    current = np.array([previous_targets[n] for n in names])
+                    lower = np.array([max(position_limits[n][0], hands.limits[n][0]) for n in names])
+                    upper = np.array([min(position_limits[n][1], hands.limits[n][1]) for n in names])
+                    target = np.clip(trigger * np.array([hands.closed[n] for n in names]), lower, upper)
+                    delta = target - current
+                    moving = np.abs(delta) > 0
+                    fraction = 1.0
+                    speeds = np.array([min(cap, hands.velocities[n]) for n in names])
+                    if moving.any():
+                        fraction = min(1.0, float(np.min(speeds[moving] * dt / np.abs(delta[moving]))))
+                    low32, high32 = _float32_bounds(
+                        np.maximum(lower, current - speeds * dt), np.minimum(upper, current + speeds * dt)
+                    )
+                    values = np.clip((current + fraction * delta).astype(np.float32), low32, high32)
+                    for n, value in zip(names, values, strict=True):
+                        candidate[robot.get_joint_offset(n)] = float(value)
+
+            self._project_hands(candidate)
+            self._project_hands(held)
+            if not arms_checked and np.array_equal(candidate, previous):
+                self.status = "hold"
+                return None
+            # Reuse this step's checked arm path only when fingers stayed held.
+            # Finger-only proposals always check against the current measurements.
+            try:
+                if not arms_checked or not np.array_equal(candidate, self._checked_configuration):
+                    self._validate_motion(measured, previous, candidate)
+            except RuntimeError as exc:
+                self.hold_reason = f"finger motion rejected: {exc}"
+                if not arms_checked:
+                    self.status = "hold"
+                    return None
+                if not np.array_equal(held, self._checked_configuration):
+                    self._validate_motion(measured, previous, held)
+                candidate = held
+            result = {n: float(candidate[robot.get_joint_offset(n)]) for n in self.command_names}
+            self._pending_positions = result.copy()
+            return result
+        except (ValueError, RuntimeError):
+            self.reject()
+            raise
+        finally:
+            robot.state.q = saved
+            robot.update_kinematics()
+
+    def _project_hands(self, configuration):
+        for passive, source, coefficients in self.hand_couplings:
+            configuration[passive] = np.polynomial.polynomial.polyval(configuration[source], coefficients)
+
+    def _step_arms(
+        self,
+        measured_positions,
+        previous_targets,
+        default_positions,
+        position_limits,
+        *,
         intent,
         frame=None,
         control_dt=None,
         arm_velocity_limit=None,
         return_velocity_limit=None,
+        held_finger_targets=None,
     ):
         """Return checked float32 positions, or None to retain targets.
 
@@ -292,6 +463,10 @@ class ExternalStateRetargeter(CollisionPolicy):
             if not np.isfinite(previous_targets[name]):
                 raise ValueError("previous arm targets must be finite")
             previous[robot.get_joint_offset(name)] = previous_targets[name]
+        if held_finger_targets is not None:
+            for name, value in held_finger_targets.items():
+                previous[robot.get_joint_offset(name)] = value
+            self._project_hands(previous)
         # Solve around the last acknowledged command. Masked arms must remain
         # there, rather than at measured servo error outside the command bounds.
         # The complete measured-to-command path is still checked independently.
@@ -448,23 +623,13 @@ class ExternalStateRetargeter(CollisionPolicy):
     def _quantize(self, candidate, bounds, previous_targets):
         if not np.isfinite(candidate).all():
             raise RuntimeError("non-finite IK solution")
-        for name, (lower, upper) in bounds.items():
-            offset = self.robot.get_joint_offset(name)
-            low32 = np.float32(lower)
-            high32 = np.float32(upper)
-            # NumPy 2 weak scalar promotion can round a Python float down to
-            # float32 during comparison, hiding an outward-rounded endpoint.
-            if float(low32) < float(lower):
-                low32 = np.nextafter(low32, np.float32(np.inf))
-            if float(high32) > float(upper):
-                high32 = np.nextafter(high32, np.float32(-np.inf))
-            if low32 > high32:
-                raise RuntimeError("command bounds contain no float32 target")
-            if not self.active[self._joint_groups[name]]:
-                held = np.float32(previous_targets[name])
-                if not low32 <= held <= high32:
-                    raise RuntimeError(f"held arm target is outside compatible limits: {name}")
-                candidate[offset] = held
-            else:
-                candidate[offset] = np.clip(np.float32(candidate[offset]), low32, high32)
+        names = list(bounds)
+        offsets = np.array([self.robot.get_joint_offset(name) for name in names])
+        low32, high32 = _float32_bounds([bounds[name][0] for name in names], [bounds[name][1] for name in names])
+        active = np.array([self.active[self._joint_groups[name]] for name in names])
+        held = np.array([previous_targets[name] for name in names], dtype=np.float32)
+        if np.any(~active & ((held < low32) | (held > high32))):
+            raise RuntimeError("held arm target is outside compatible limits")
+        values = np.clip(candidate[offsets].astype(np.float32), low32, high32)
+        candidate[offsets] = np.where(active, values, held)
         return candidate

@@ -12,11 +12,15 @@ from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
 from . import ControlGroup, RobotProfile
 
 
-def deployment_urdf():
+def deployment_urdf(omnihand=False):
     """Restore measured body DOFs while retaining fitted collision geometry."""
     assets = Path(ASSET_PATH) / "agibot/x2"
-    root = ET.parse(assets / "x2_fixed.urdf").getroot()
-    arm_names = [joint.get("name") for joint in root.findall("joint") if joint.get("type") == "revolute"]
+    root = ET.parse(assets / ("x2_omnihand_ik.urdf" if omnihand else "x2_fixed.urdf")).getroot()
+    arm_names = [
+        joint.get("name")
+        for joint in root.findall("joint")
+        if joint.get("type") == "revolute" and not joint.get("name").startswith(("L_", "R_"))
+    ]
     source = ET.parse(assets / "x2_ultra.urdf").getroot()
     for joint in source.findall("joint"):
         if joint.get("type") != "fixed" and joint.get("name") not in arm_names:
@@ -31,11 +35,11 @@ def deployment_urdf():
 
 
 @contextmanager
-def load_profile(settings):
-    root, arms = deployment_urdf()
+def load_profile(settings, omnihand=False):
+    root, arms = deployment_urdf(omnihand)
     observed = tuple(j.get("name") for j in root.findall("joint") if j.get("type") != "fixed")
-    if len(arms) != 14 or len(observed) != 31:
-        raise ValueError("X2 requires 14 controlled arm joints and 31 observed joints")
+    if len(arms) != 14 or len(observed) != (69 if omnihand else 31):
+        raise ValueError("X2 requires 14 controlled arms and the matching body/finger observations")
     limits = {}
     velocities = {}
     for name in arms:
@@ -55,7 +59,11 @@ def load_profile(settings):
         path = Path(directory) / "x2.urdf"
         pairs = Path(directory) / "collisions.json"
         ET.ElementTree(root).write(path)
-        pairs.write_bytes((Path(ASSET_PATH) / "agibot/x2/collisions.json").read_bytes())
+        pairs.write_bytes(
+            (
+                Path(ASSET_PATH) / "agibot/x2" / ("collisions_omnihand.json" if omnihand else "collisions.json")
+            ).read_bytes()
+        )
         spec = RobotSpec(
             str(path),
             tuple(arms),
@@ -66,4 +74,14 @@ def load_profile(settings):
             str(pairs),
             1 / settings.control_frequency,
         )
-        yield RobotProfile(spec, observed, groups, "torso_link", velocities)
+        if omnihand:
+            from xrobotoolkit_teleop.integrations.robot_profiles.omnihand import load_hands
+
+            hands = load_hands(root)
+        else:
+            hands = None
+        yield RobotProfile(spec, observed, groups, "torso_link", velocities, hands=hands)
+
+
+def load_omnihand_profile(settings):
+    return load_profile(settings, omnihand=True)

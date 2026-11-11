@@ -85,6 +85,7 @@ class RoboJuDoBridge:
         self._xr_changed_at = None
         self._xr_updates = 0
         self._xr_grips = {}
+        self._xr_triggers = {}
         self._xr_report_at = time.monotonic()
         self._timing_ms = {}
 
@@ -112,10 +113,11 @@ class RoboJuDoBridge:
         if (
             not isinstance(state, dict)
             or type(state.get("schema_version")) is not int
-            or state["schema_version"] != 1
+            or state["schema_version"] != (2 if self.retargeter.hand_names else 1)
             or state.get("type") != "upper_body_state"
         ):
-            raise ValueError("expected upper_body_state schema version 1")
+            version = 2 if self.retargeter.hand_names else 1
+            raise ValueError(f"expected upper_body_state schema version {version}")
         if not isinstance(state.get("session_id"), str) or not 1 <= len(state["session_id"]) <= 64:
             raise ValueError("invalid robot session")
         for name in ("state_id", "command_id", "generation"):
@@ -126,15 +128,15 @@ class RoboJuDoBridge:
         for key, names in (
             ("positions", self.retargeter.joint_names),
             ("joint_age_s", self.retargeter.joint_names),
-            ("last_commanded_positions", self.retargeter.arm_names),
-            ("default_positions", self.retargeter.arm_names),
+            ("last_commanded_positions", self.retargeter.command_names),
+            ("default_positions", self.retargeter.command_names),
         ):
             if not isinstance(state.get(key), dict) or set(state[key]) != set(names):
                 raise ValueError(f"robot feedback has incompatible {key}")
             for value in state[key].values():
                 _number(value)
         limits = state.get("position_limits")
-        if not isinstance(limits, dict) or set(limits) != set(self.retargeter.arm_names):
+        if not isinstance(limits, dict) or set(limits) != set(self.retargeter.command_names):
             raise ValueError("incompatible arm limit names")
         for bounds in limits.values():
             if not isinstance(bounds, list) or len(bounds) != 2 or _number(bounds[0]) >= _number(bounds[1]):
@@ -142,6 +144,8 @@ class RoboJuDoBridge:
         for key in ("control_dt", "arm_velocity_limit", "return_velocity_limit", "feedback_timeout_s"):
             if _number(state.get(key)) <= 0:
                 raise ValueError(f"invalid positive parameter: {key}")
+        if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
+            raise ValueError("invalid positive hand_velocity_limit")
         if not all(0 <= age <= state["feedback_timeout_s"] for age in state["joint_age_s"].values()):
             raise ValueError("robot joint measurements are stale")
 
@@ -160,12 +164,16 @@ class RoboJuDoBridge:
             poses={name: xr.get_pose_by_name(name) for name in devices},
             grips={key: xr.get_key_value_by_name(group.grip) for key, group in profile.groups.items()},
             return_to_default=xr.get_button_state_by_name(profile.home_button),
+            triggers={}
+            if profile.hands is None
+            else {side: xr.get_key_value_by_name(f"{side}_trigger") for side in profile.hands.groups},
         )
         if self._xr_timestamp != frame.timestamp_ns:
             self._xr_changed_at = time.monotonic()
             self._xr_updates += 1
         self._xr_timestamp = frame.timestamp_ns
         self._xr_grips = frame.grips.copy()
+        self._xr_triggers = frame.triggers.copy()
         return frame
 
     def report_xr_diagnostics(self):
@@ -176,11 +184,12 @@ class RoboJuDoBridge:
             return
         age = None if self._xr_changed_at is None else round(now - self._xr_changed_at, 3)
         logger.info(
-            "XR SDK: timestamp=%s, age_s=%s, observed_updates_hz=%.1f, grips=%s, robot_intent=%s",
+            "XR SDK: timestamp=%s, age_s=%s, observed_updates_hz=%.1f, grips=%s, triggers=%s, robot_intent=%s",
             self._xr_timestamp,
             age,
             self._xr_updates / elapsed,
             self._xr_grips,
+            self._xr_triggers,
             getattr(self, "_robot_intent", "no feedback"),
         )
         logger.info("Arm round-trip timing (ms): %s", {key: round(value, 1) for key, value in self._timing_ms.items()})
@@ -297,6 +306,7 @@ class RoboJuDoBridge:
                 control_dt=latest["control_dt"],
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
+                hand_velocity_limit=latest.get("hand_velocity_limit"),
             )
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
@@ -315,7 +325,7 @@ class RoboJuDoBridge:
                 return False
             self._frame_id += 1
             message = {
-                "schema_version": 1,
+                "schema_version": 2 if self.retargeter.hand_names else 1,
                 "type": "upper_body_proposal" if proposal is not None else "upper_body_visualization",
                 "bridge_id": self.bridge_id,
                 "session_id": latest["session_id"],
@@ -355,6 +365,7 @@ def main(
     scale_factor: float = DEFAULTS.scale_factor,
     arm_velocity_limit: float = DEFAULTS.arm_velocity_limit,
     return_velocity_limit: float = DEFAULTS.return_velocity_limit,
+    hand_velocity_limit: float = DEFAULTS.hand_velocity_limit,
     collision_margin: float = DEFAULTS.collision_margin,
     collision_trigger: float = DEFAULTS.collision_trigger,
     control_frequency: float = DEFAULTS.control_frequency,
@@ -370,6 +381,7 @@ def main(
         scale_factor=scale_factor,
         arm_velocity_limit=arm_velocity_limit,
         return_velocity_limit=return_velocity_limit,
+        hand_velocity_limit=hand_velocity_limit,
         collision_margin=collision_margin,
         collision_trigger=collision_trigger,
         control_frequency=control_frequency,

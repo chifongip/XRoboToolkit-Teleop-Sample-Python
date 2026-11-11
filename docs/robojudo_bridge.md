@@ -54,7 +54,8 @@ The schema stays at version 1 and robot-owned deadlines remain authoritative. On
 4. Configure RoboJuDo's existing upper-body controller with the same controlled joints and ensure feedback supplies
    every observed joint. RoboJuDo's existing target viewer supports X2's `left`/`right` labels relative to
    `torso_link`; disable `visualize_targets` for other layouts until their viewer is adapted. This affects display,
-   not joint-command validation. Keep the arm-only protocol: hands and base commands are outside this integration.
+   not joint-command validation. Use schema version 1 for arm-only profiles. The bundled `x2_omnihand` profile
+   uses version 2 for fingers; base commands remain outside this integration.
 5. Test feedback-name validation, moving reference frames, clutch mapping, limits/collision checks, HOME, and
    acknowledgement rollback. `tests/test_robojudo_profiles.py` demonstrates a one-joint profile with non-X2 names,
    a custom device mapping, and a stateful test solver.
@@ -112,3 +113,19 @@ Run the full native suite from this submodule's root with the optional dependenc
 ```bash
 PYTHONPATH=. X2_TEST_LEROBOT=1 python -m unittest discover -s tests
 ```
+
+## OmniHand profile
+
+Select `--robot x2_omnihand` with either backend. This profile observes 69 joints, optimizes 14 arm joints,
+and produces 24 additional active finger targets from independent controller triggers (grips clutch arms only).
+The version 2 protocol requires the matching RoboJuDo OmniHand XR preset. The hardware SDK and serial-selected
+HCAN adapters live on the robot; the XR environment has no vendor SDK dependency.
+
+Hand targets use coordinated interpolation and nonlinear passive coupling for sampled collision paths. HOME
+retains finger targets. Combined acknowledgement covers arm submission plus both hand writes. A failed finger
+step can fall back to independently checked arm motion with fingers held. Existing arm-only profiles retain
+version 1 and their behavior. See RoboJuDo's guide for local serial configuration, read-only verification,
+worker lifecycle, hardware acceptance, and the additional MuJoCo model.
+
+Run `PYTHONPATH=. python -m unittest discover -s tests -p test_robojudo_omnihand.py`; set
+`BRIDGE_TEST_BACKEND=lerobot` to exercise the alternative solver.
