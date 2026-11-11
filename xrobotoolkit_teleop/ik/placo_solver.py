@@ -27,7 +27,11 @@ class PlacoIKSolver(IKSolver):
             for key, frame in spec.frames.items()
         }
         self.manipulability = [
-            self._native.add_manipulability_task(frame, "both", 1.0) for frame in spec.frames.values()
+            self._native.add_manipulability_task(frame, "both", 1.0)
+            for key, frame in spec.frames.items()
+            # A 6D manipulability determinant is identically zero for groups
+            # with fewer than six joints; its derivative can make the QP NaN.
+            if len(spec.groups.get(key, spec.joints)) >= 6
         ]
         self.posture_task = self._native.add_joints_task()
         self._constraints = [
@@ -71,4 +75,4 @@ class PlacoIKSolver(IKSolver):
         self._set_constraint(self._constraints[2], problem.soft.A, problem.soft.b, "soft")
         self._native.solve(True)
         q = np.array([self.robot.get_joint(n) for n in self.spec.joints])
-        return dict(zip(self.spec.joints, q))
+        return dict(zip(self.spec.joints, q, strict=True))

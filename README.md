@@ -17,8 +17,12 @@ the `x2` extra from this repository's root:
 python -m pip install -e ".[x2]"
 ```
 
-A fresh environment is recommended for dependency isolation, but an existing
-compatible environment also works. With Conda installed, create a dedicated
+For the RoboJuDo integration, run `python scripts/install_xrobotoolkit_teleop.py` from the RoboJuDo-Plus root.
+It creates a single `robojudo-xr` Python 3.11 environment with Placo and LeRobot, including the native bindings.
+Use `--reuse` explicitly for an existing environment, or `--name NAME` to choose another name.
+See [the bridge setup guide](docs/robojudo_bridge.md).
+
+For a standalone Placo-only installation, a fresh environment is recommended for dependency isolation. With Conda installed, create a dedicated
 Python 3.11 environment and run these commands from this repository's root:
 
 ```bash
@@ -28,8 +32,8 @@ python -m pip install -e ".[x2]"
 ```
 
 If reusing an existing Python 3.10+ environment, activate it and run only the pip
-command. RoboJuDo-Plus's installer requires Python 3.11+, so use Python 3.11 for
-an environment shared with that integration. In later terminals, activate
+command. RoboJuDo-Plus's automated setup instead creates its target with Python 3.11 and both IK methods.
+In later terminals, activate
 `robojudo-xr` again before running the sample. These commands install only the
 X2 Python dependencies; PC Service remains a separate installation. The X2-only
 pip installation does not create or switch Conda environments.
@@ -62,6 +66,12 @@ the `all` extra and are not needed for X2-only installation.
 
 ### RoboJuDo-Plus X2 bridge
 
+The profile-driven bridge supports the registered IK methods independently of robot configuration:
+`python -m xrobotoolkit_teleop.integrations.robojudo --robot x2 --ik-backend placo`.
+Use `--ik-backend lerobot` with the optional native stack configured.
+See the [architecture and robot extension guide](docs/robojudo_bridge.md) for profile registration,
+acknowledged solver history, dependencies and compatibility. The X2 commands below remain supported.
+
 The `x2` extra also provides a headless bridge using live measured robot state:
 
 ```bash
@@ -86,8 +96,9 @@ Tracking holds on stale input and automatically rebases controller references
 when fresh data returns, discarding motion made during a transient hold. Startup,
 explicit mode changes, and a restarted bridge require grip release before engagement.
 IK starts from acknowledged arm targets; measured servo lag cannot pin an ungripped
-arm outside its command speed window. The posture preference remains at the configured
-default pose, so repeated near-straight-arm movements do not accumulate redundant-joint drift.
+arm outside its command speed window. Placo combines the configured default posture with
+its upstream manipulability objective; LeRobot retains its joint-angle objective and filter.
+These methods can select different redundant-joint postures for matching hand poses.
 Nonlinear collision rejection tries bounded shorter steps, each checked against
 both measured and acknowledged configurations. Explicit teleop disable requests
 a checked return to defaults, which can run without XR tracking. If the bridge is offline the robot retains
@@ -98,6 +109,8 @@ and recording controls remain in RoboJuDo. OmniHand integration is deferred.
 The reusable `common.x2_arm_retargeter.X2ArmRetargeter` accepts measured joint
 positions, acknowledged arm targets, defaults, limits, intent, and optional
 `X2XRFrame` input. It returns a complete float32 arm proposal or `None` to hold.
+Direct users must call `acknowledge(applied_positions)` after confirmed application, or `reject()`
+on rejection; publishing a proposal does not commit backend history. The bridge manages this lifecycle automatically.
 It restores body DOFs in the bundled model for observation, masks them during
 IK, and checks the final measured-to-target and previous-to-target paths without
 advancing physics. Robot-owned session, generation, feedback, and command IDs

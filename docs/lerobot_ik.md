@@ -7,8 +7,8 @@ python scripts/simulation/teleop_agibot_x2_mujoco.py --ik-backend lerobot
 python scripts/simulation/teleop_agibot_x2_mujoco.py --ik-backend lerobot --with-omnihand
 ```
 
-`placo` remains the default. RoboJuDo's external-state bridge continues to use
-its existing solver; it does not accept this option.
+`placo` remains the default. RoboJuDo's external-state bridge also supports
+`--ik-backend lerobot`; see [the bridge guide](robojudo_bridge.md).
 
 ## Behavior
 
@@ -97,7 +97,7 @@ Runtime imports are independent. The repository still installs Placo as a base
 dependency for its other robot demos; this change does not reorganize package extras.
 `ik/safety.py` implements the common collision policy. X2 joint names, frames,
 actuator limits, and hand couplings are configured by the controller. Other
-robot demos and RoboJuDo keep their existing implementations.
+robot demos keep their existing implementations. RoboJuDo uses the same backend API through its external-state retargeter.
 
 To add a method:
 
@@ -179,7 +179,17 @@ It covers both scenes and both installed backends, verifies that no real XR
 client starts, and confirms that a backend which only holds commands fails the
 pose test. LeRobot cases are skipped unless `X2_TEST_LEROBOT=1` is set.
 
-## Native environment
+## Automated environment for RoboJuDo
+
+From the RoboJuDo-Plus root, `python scripts/install_xrobotoolkit_teleop.py` creates `robojudo-xr` with Python 3.11,
+Placo and LeRobot, builds the matching symbolic bindings and registers them permanently. Activate that environment
+with `conda activate robojudo-xr`. Both IK methods run there; no manual `PYTHONPATH` setup is needed.
+See the [RoboJuDo installation guide](../../../docs/xrobotoolkit_teleop.md) for prerequisites, reuse and verification.
+
+## Manual native environment
+
+The recipe below is an alternative for standalone installations and records the previously validated Python 3.10 stack.
+RoboJuDo's automated environment uses Python 3.11 and compiles bindings for that interpreter.
 
 Do the dependency work in a copy of the working XR environment. This backend
 requires `pinocchio.casadi`, which is absent from the installed pip `pin`

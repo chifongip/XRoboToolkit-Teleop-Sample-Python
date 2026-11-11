@@ -1,4 +1,4 @@
-"""LeRobot G1's nonlinear IK objective and filter, adapted to named X2 joints.
+"""LeRobot G1's nonlinear IK objective and filter for named scalar joints.
 
 Algorithm reference: Hugging Face LeRobot's G1_29_ArmIK (Apache-2.0).
 This module intentionally imports the optional native dependencies only on use.
@@ -6,9 +6,9 @@ This module intentionally imports the optional native dependencies only on use.
 
 from collections import deque
 
-from .backend import IKSolver
-
 import numpy as np
+
+from .backend import IKSolver
 
 
 def load_dependencies():
@@ -43,54 +43,67 @@ class G1IKSolver:
     def __init__(self, urdf_path, joint_names, position_limits, frames=None, groups=None):
         self.pin, cpin, ca = load_dependencies()
         self.joint_names = tuple(joint_names)
-        if len(self.joint_names) != 14 or len(set(self.joint_names)) != 14:
-            raise ValueError("LeRobot X2 IK requires 14 distinct arm joints")
+        if not self.joint_names or len(set(self.joint_names)) != len(self.joint_names):
+            raise ValueError("LeRobot IK requires distinct controlled joints")
         full = self.pin.buildModelFromUrdf(str(urdf_path))
+        self.full_model = full
+        self.body_configuration = self.pin.neutral(full)
+        self._full_indices = {name: full.idx_qs[full.getJointId(name)] for name in full.names[1:]}
+        self._full_data = full.createData()
         missing = set(self.joint_names) - set(full.names)
         if missing:
             raise ValueError(f"IK model is missing arm joints: {sorted(missing)}")
         locked = [j for j in range(1, full.njoints) if full.names[j] not in self.joint_names]
         self.model = self.pin.buildReducedModel(full, locked, self.pin.neutral(full))
-        if self.model.nq != 14 or self.model.nv != 14:
-            raise ValueError("LeRobot X2 IK requires scalar arm joints")
+        if self.model.nq != len(self.joint_names) or self.model.nv != len(self.joint_names):
+            raise ValueError("LeRobot IK requires scalar controlled joints")
         self.indices = np.array([self.model.idx_qs[self.model.getJointId(n)] for n in self.joint_names])
         self.arm_indices = {
-            side: np.array([i for n, i in zip(self.joint_names, self.indices) if n in names])
+            side: np.array([i for n, i in zip(self.joint_names, self.indices, strict=True) if n in names])
             for side, names in (
                 groups
                 or {side: [n for n in self.joint_names if n.startswith(f"{side}_")] for side in ("left", "right")}
             ).items()
         }
         self._active_keys = {key: key if groups is not None else f"{key}_arm" for key in self.arm_indices}
-        if any(len(indices) != 7 for indices in self.arm_indices.values()):
-            raise ValueError("LeRobot X2 IK requires seven named joints per arm")
+        if any(not len(indices) for indices in self.arm_indices.values()):
+            raise ValueError("LeRobot IK requires nonempty control groups")
         self.lower = self.model.lowerPositionLimit.copy()
         self.upper = self.model.upperPositionLimit.copy()
-        for name, index in zip(self.joint_names, self.indices):
+        for name, index in zip(self.joint_names, self.indices, strict=True):
             lower, upper = position_limits[name]
             self.lower[index] = max(lower, self.lower[index])
             self.upper[index] = min(upper, self.upper[index])
         if not np.isfinite([self.lower, self.upper]).all() or np.any(self.lower >= self.upper):
-            raise ValueError("Incompatible finite X2 joint position limits")
-        self.frame_ids = {
-            key: self.model.getFrameId(frame)
-            for key, frame in (frames or {side: f"{side}_hand_center" for side in ("left", "right")}).items()
-        }
+            raise ValueError("Incompatible finite joint position limits")
+        frame_names = frames or {side: f"{side}_hand_center" for side in ("left", "right")}
+        self.frame_ids = {key: self.model.getFrameId(frame) for key, frame in frame_names.items()}
+        self._full_frame_ids = {key: full.getFrameId(frame) for key, frame in frame_names.items()}
         if any(i >= self.model.nframes for i in self.frame_ids.values()):
-            raise ValueError("IK model requires left/right_hand_center frames")
-        self.data = self.model.createData()
-        cm = cpin.Model(self.model)
+            raise ValueError("IK model is missing a configured end-effector frame")
+        # Keep observed, uncontrolled joints in symbolic FK. Reducing them at
+        # neutral would give the wrong targets when a deployment torso moves.
+        cm = cpin.Model(full)
         cd = cm.createData()
-        cq = ca.SX.sym("q", 14)
+        cq = ca.SX.sym("q", self.model.nq)
+        body = ca.SX.sym("body", full.nq)
+        configuration = ca.SX(body)
+        for name, index in zip(self.joint_names, self.indices, strict=True):
+            configuration[full.idx_qs[full.getJointId(name)]] = cq[index]
         targets = {side: ca.SX.sym(f"target_{side}", 4, 4) for side in self.frame_ids}
-        cpin.framesForwardKinematics(cm, cd, cq)
+        cpin.framesForwardKinematics(cm, cd, configuration)
         translation = ca.vertcat(
-            *[cd.oMf[fid].translation - targets[side][:3, 3] for side, fid in self.frame_ids.items()]
+            *[cd.oMf[fid].translation - targets[key][:3, 3] for key, fid in self._full_frame_ids.items()]
         )
         rotation = ca.vertcat(
-            *[cpin.log3(cd.oMf[fid].rotation @ targets[side][:3, :3].T) for side, fid in self.frame_ids.items()]
+            *[cpin.log3(cd.oMf[fid].rotation @ targets[key][:3, :3].T) for key, fid in self._full_frame_ids.items()]
         )
-        self.errors = ca.Function("x2_errors", [cq, *targets.values()], [translation, rotation])
+        # Pinocchio's symbolic log3 contains inactive branches with singular
+        # derivatives at axis-aligned rotations. Reverse AD can propagate 0*NaN
+        # through them; forward AD preserves the same objective without that path.
+        self.errors = ca.Function(
+            "ik_errors", [cq, body, *targets.values()], [translation, rotation], {"enable_reverse": False}
+        )
         self._build_optimizer(ca)
         self._history = deque(maxlen=4)
         self._previous = None
@@ -99,12 +112,13 @@ class G1IKSolver:
     def _build_optimizer(self, ca):
         """Create a solver graph without changing accepted filter state."""
         self.opti = ca.Opti()
-        self.q = self.opti.variable(14)
-        self.reference = self.opti.parameter(14)
+        self.q = self.opti.variable(self.model.nq)
+        self.reference = self.opti.parameter(self.model.nq)
         self.targets = {side: self.opti.parameter(4, 4) for side in self.frame_ids}
-        self.bound_lower = self.opti.parameter(14)
-        self.bound_upper = self.opti.parameter(14)
-        ep, er = self.errors(self.q, *self.targets.values())
+        self.bound_lower = self.opti.parameter(self.model.nq)
+        self.bound_upper = self.opti.parameter(self.model.nq)
+        self.body = self.opti.parameter(self.full_model.nq)
+        ep, er = self.errors(self.q, self.body, *self.targets.values())
         self.tracking_cost = (
             50 * ca.sumsqr(ep) + ca.sumsqr(er) + 0.02 * ca.sumsqr(self.q) + 0.1 * ca.sumsqr(self.q - self.reference)
         )
@@ -121,7 +135,7 @@ class G1IKSolver:
 
     def _vector(self, positions):
         q = np.empty(self.model.nq)
-        for name, index in zip(self.joint_names, self.indices):
+        for name, index in zip(self.joint_names, self.indices, strict=True):
             q[index] = positions[name]
         if not np.isfinite(q).all():
             raise ValueError("IK joint positions must be finite")
@@ -132,7 +146,7 @@ class G1IKSolver:
             self._active.difference_update(
                 key
                 for key, indices in self.arm_indices.items()
-                if any(n in joints for n, i in zip(self.joint_names, self.indices) if i in indices)
+                if any(n in joints for n, i in zip(self.joint_names, self.indices, strict=True) if i in indices)
             )
             return
         self._history.clear()
@@ -142,9 +156,22 @@ class G1IKSolver:
     def close(self):
         self.reset()
 
+    def _full_configuration(self, positions):
+        configuration = self.body_configuration.copy()
+        # Require all controlled joints; omitted observed joints retain neutral.
+        for name in self.joint_names:
+            configuration[self._full_indices[name]] = positions[name]
+        for name, value in positions.items():
+            if name in self._full_indices:
+                configuration[self._full_indices[name]] = value
+        if not np.isfinite(configuration).all():
+            raise ValueError("Observed body configuration must be finite")
+        return configuration
+
     def forward_kinematics(self, positions):
-        self.pin.framesForwardKinematics(self.model, self.data, self._vector(positions))
-        return {side: self.data.oMf[fid].homogeneous.copy() for side, fid in self.frame_ids.items()}
+        configuration = self._full_configuration(positions)
+        self.pin.framesForwardKinematics(self.full_model, self._full_data, configuration)
+        return {key: self._full_data.oMf[fid].homogeneous.copy() for key, fid in self._full_frame_ids.items()}
 
     def solve(self, measured_positions, previous_positions, targets, active_arms):
         measured = self._vector(measured_positions)
@@ -176,12 +203,13 @@ class G1IKSolver:
             if target.shape != (4, 4) or not np.isfinite(target).all():
                 raise ValueError(f"Invalid {side} IK target")
             self.opti.set_value(parameter, target)
+        self.opti.set_value(self.body, self._full_configuration(measured_positions))
         self.opti.set_initial(self.q, np.clip(reference, lower, upper))
         self.opti.set_value(self.reference, reference)
         self.opti.set_value(self.bound_lower, lower)
         self.opti.set_value(self.bound_upper, upper)
         try:
-            solution = np.asarray(self.opti.solve().value(self.q)).reshape(14)
+            solution = np.asarray(self.opti.solve().value(self.q)).reshape(self.model.nq)
         except RuntimeError as exc:
             raise RuntimeError("LeRobot IK did not converge; holding commands") from exc
         if not np.isfinite(solution).all() or np.any(solution < lower - 1e-6) or np.any(solution > upper + 1e-6):
@@ -194,7 +222,7 @@ class G1IKSolver:
         self._history = deque(history, maxlen=4)
         self._previous = filtered.copy()
         self._active = active
-        return {n: float(filtered[i]) for n, i in zip(self.joint_names, self.indices)}
+        return {n: float(filtered[i]) for n, i in zip(self.joint_names, self.indices, strict=True)}
 
 
 class LeRobotIKSolver(G1IKSolver, IKSolver):
