@@ -147,6 +147,29 @@ Real hardware acceptance is separate from automated MuJoCo checks.
     bash setup.sh
     ```
 
+### USB connection
+
+To stream from a PICO headset over USB-C, install Android Debug Bridge (`adb`),
+enable USB debugging on the headset, and start XRoboToolkit PC Service on the PC.
+
+1. Connect the headset to the PC with a USB-C data cable and authorize USB debugging if prompted.
+2. Verify that the headset appears as a device:
+
+   ```bash
+   adb devices
+   ```
+
+3. Forward the headset's service port to the PC and verify the mapping:
+
+   ```bash
+   adb reverse tcp:63901 tcp:63901
+   adb reverse --list
+   ```
+
+4. In the headset app, enter `127.0.0.1` as the PC Service IP address and start streaming.
+
+These steps were shared in [issue #28](https://github.com/XR-Robotics/XRoboToolkit-Teleop-Sample-Python/issues/28).
+
 ## Usage
 Use the following instructions to run example scripts. For a more detailed description, please refer to [`teleop_details.md`](teleop_details.md).
 
