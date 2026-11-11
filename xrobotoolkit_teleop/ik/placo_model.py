@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import placo
 
-from .model import Distance, NativeState, model_description, validate_collision_links
+from .model import Distance, NativeState, checked_pair_indices, model_description, validate_collision_links
 
 
 class PlacoModel:
@@ -23,9 +23,72 @@ class PlacoModel:
             objects=tuple(descriptions[obj.name] for obj in self._native.collision_model.objects),
             collision_pairs=tuple(self._native.collision_model.collision_pairs),
         )
+        self._init_subset_queries()
         for name, position in spec.initial_positions.items():
             self.set_joint(name, position)
         self.update_kinematics()
+
+    def _init_subset_queries(self):
+        """Use Placo placements and the same Coal primitives, without another FK model."""
+        if any(obj.type not in {"box", "cylinder", "sphere"} for obj in self.collision_model.objects):
+            self.distance_subset = None
+            return
+        try:
+            import coal
+        except ImportError:
+            # Placo-only installations may provide libcoal without its Python
+            # bindings. The shared checker then keeps exhaustive behavior.
+            self.distance_subset = None
+            return
+        self._coal = coal
+        self._subset_shapes = []
+        for obj in self.collision_model.objects:
+            if obj.type == "box":
+                shape = coal.Box(*obj.size)
+            elif obj.type == "cylinder":
+                shape = coal.Cylinder(*obj.size[:2])
+            else:
+                shape = coal.Sphere(obj.size[0])
+            self._subset_shapes.append(shape)
+        self._subset_request = coal.DistanceRequest()
+        self._subset_request.enable_signed_distance = True
+        self._subset_parents = [obj.parent_joint for obj in self._native.collision_model.objects]
+
+    def distance_subset(self, pair_indices):
+        """Exact signed distances and copied witnesses in requested pair order."""
+        pairs = self.collision_model.collision_pairs
+        indices = checked_pair_indices(pair_indices, len(pairs))
+        if not indices:
+            return []
+        placements = self.collision_placements(self.state.q)
+        transforms = {
+            index: self._coal.Transform3s(placements[index, :3, :3], placements[index, :3, 3])
+            for index in {obj for pair in indices for obj in pairs[pair]}
+        }
+        records = []
+        for index in indices:
+            a, b = pairs[index]
+            result = self._coal.DistanceResult()
+            self._coal.distance(
+                self._subset_shapes[a],
+                transforms[a],
+                self._subset_shapes[b],
+                transforms[b],
+                self._subset_request,
+                result,
+            )
+            records.append(
+                Distance(
+                    a,
+                    b,
+                    self._subset_parents[a],
+                    self._subset_parents[b],
+                    result.min_distance,
+                    np.array(result.getNearestPoint1()),
+                    np.array(result.getNearestPoint2()),
+                )
+            )
+        return records
 
     def joint_names(self):
         return self._names

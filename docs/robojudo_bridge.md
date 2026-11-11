@@ -129,3 +129,68 @@ worker lifecycle, hardware acceptance, and the additional MuJoCo model.
 
 Run `PYTHONPATH=. python -m unittest discover -s tests -p test_robojudo_omnihand.py`; set
 `BRIDGE_TEST_BACKEND=lerobot` to exercise the alternative solver.
+
+### Shared collision checking
+
+Both model adapters support optional `distance_subset(pair_indices)` queries, returning exact signed
+distances and copied witnesses in requested pair order. The checker uses conservative primitive bounds to
+exclude distant pairs before requesting exact results. `clearances(threshold)` caps those results at the
+requested threshold; it keeps a separate cache from exhaustive `distances()` and its exact motion references.
+Certified capped clearances also provide a separate motion-bound reference: subtracting each shape's maximum
+displacement preserves a lower bound without treating capped values as exact distances.
+An additional 1 micrometre guard includes borderline pairs in exact queries. Geometry, configured pairs,
+clearance margins, and coupled-path sample spacing are unchanged. Finite-difference penetration recovery
+continues to use exhaustive signed queries. Adapters without subset support retain exhaustive behavior.
+Placo uses its own native geometry placements with Coal primitive distance queries; no second robot/FK model,
+Pinocchio, or CasADi is required. Coal's Python bindings are included in the `x2` extra. A Placo-only installation
+without those bindings, or a model with unsupported primitives, retains exhaustive queries. The shared X2
+simulation controller also uses the threshold-aware checker for both backends.
+
+Run the native subset/oracle regression tests with:
+
+```bash
+PYTHONPATH=.:tests X2_TEST_LEROBOT=1 python -m unittest test_collision_subset
+```
+
+Compare warm bridge retargeting times without a headset or robot:
+
+```bash
+PYTHONPATH=. python scripts/misc/benchmark_bridge_collisions.py --steps 60 --repeats 3
+PYTHONPATH=. python scripts/misc/benchmark_bridge_collisions.py --ik-backend placo --steps 60 --repeats 3
+```
+
+This sequential benchmark alternates exhaustive and selective execution order. It reports retargeting and
+collision median/p95 times, exact pair-query counts, and held cycles for stationary fingers, closing fingers,
+servo lag, and repeated penetrating recovery snapshots. Every accepted command is independently validated
+with exhaustive signed queries at every path sample outside the timed region. Setup and six warmup frames
+are excluded. Run without concurrent tests or other substantial CPU workloads when comparing performance.
+
+The timing tables below predate the stricter oracle: their reference validation used exhaustive baseline
+distances but still allowed conservative bounds for path samples. The current benchmark disables bounds in
+the oracle, so all sampled configurations receive exact signed-distance checks.
+
+LeRobot validation on 2026-11-11 used 40 measured cycles per run and three repeats per mode/scenario,
+with native Python 3.11 dependencies. The following are medians of the three run-level statistics;
+retarget times exclude XR reads and transport. All 24 runs had zero held cycles and every accepted
+command passed reference path validation. These are replay measurements, not live hardware guarantees.
+
+| Scenario | Collision median, exhaustive → selective | Retarget median, exhaustive → selective | Retarget p95, exhaustive → selective |
+| --- | ---: | ---: | ---: |
+| Fingers stationary | 7.27 → 1.31 ms | 22.59 → 15.70 ms | 26.25 → 18.86 ms |
+| Fingers closing | 8.14 → 2.14 ms | 24.31 → 17.71 ms | 27.54 → 19.88 ms |
+| Servo lag | 14.53 → 1.45 ms | 30.19 → 15.94 ms | 34.49 → 18.50 ms |
+| Repeated penetrating snapshot | 237.75 → 207.85 ms | 262.94 → 233.39 ms | 269.65 → 240.19 ms |
+
+Normal tracking required a median 41–45.5 exact pair queries per cycle, versus 4,563 for exhaustive checking
+(servo lag required 9,126 exhaustive queries). Recovery intentionally retains the expensive exhaustive
+finite-difference derivatives and remains outside a 20 ms control budget.
+
+The same 40-cycle, three-repeat comparison for Placo produced the following medians of run-level statistics.
+All 24 runs had zero held measured cycles and all accepted commands passed reference path validation.
+
+| Scenario | Collision median, exhaustive → selective | Retarget median, exhaustive → selective | Retarget p95, exhaustive → selective |
+| --- | ---: | ---: | ---: |
+| Fingers stationary | 8.46 → 1.18 ms | 10.09 → 2.32 ms | 11.07 → 2.54 ms |
+| Fingers closing | 8.81 → 1.82 ms | 10.96 → 3.43 ms | 11.62 → 3.86 ms |
+| Servo lag | 16.63 → 1.31 ms | 18.30 → 2.46 ms | 23.71 → 2.65 ms |
+| Repeated penetrating snapshot | 274.35 → 242.93 ms | 276.81 → 245.25 ms | 283.17 → 250.48 ms |

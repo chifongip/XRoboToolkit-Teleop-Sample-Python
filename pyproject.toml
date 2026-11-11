@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 # Fixed-base X2 arms and optional simulated Omnihand Pro fingers.
 x2 = [
+    "coal",
     "mujoco",
     "tyro",
     "pyzmq",

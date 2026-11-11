@@ -1,6 +1,7 @@
 """Geometry records shared by native model adapters; no solver dependencies."""
 
 from dataclasses import dataclass
+from operator import index
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -24,6 +25,14 @@ class Distance:
     min_distance: float
     pointA: np.ndarray
     pointB: np.ndarray
+
+
+def checked_pair_indices(pair_indices, pair_count):
+    """Accept integer pair IDs without silently truncating floats or strings."""
+    indices = [index(value) for value in pair_indices]
+    if any(value < 0 or value >= pair_count for value in indices):
+        raise ValueError("Collision pair index out of range")
+    return indices
 
 
 def geometry_descriptions(urdf_path):

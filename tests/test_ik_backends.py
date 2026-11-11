@@ -309,7 +309,7 @@ class NativeBackendContracts(BackendContracts):
 
     def test_backends_load_independently_in_fresh_processes(self):
         root = Path(__file__).resolve().parents[1]
-        for backend, blocked in (("lerobot", ("placo", "placo_utils")), ("placo", ("pinocchio", "casadi", "coal"))):
+        for backend, blocked in (("lerobot", ("placo", "placo_utils")), ("placo", ("pinocchio", "casadi"))):
             program = """
 import importlib.abc, sys
 class Block(importlib.abc.MetaPathFinder):

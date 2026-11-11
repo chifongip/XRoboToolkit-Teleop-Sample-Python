@@ -246,16 +246,20 @@ class ExternalStateRetargeter(CollisionPolicy):
         robot = self.robot
         try:
             robot.state.q = measured
-            measured_distances = self.collision_checker.distances()
+            measured_distances = self.collision_checker.clearances(self.collision_margin)
             for start in (measured, previous):
                 robot.state.q = start
-                distances = self.collision_checker.distances()
+                distances = self.collision_checker.clearances(self.collision_margin)
                 floor = np.minimum(np.minimum(distances, measured_distances), self.collision_margin)
                 for configuration in self._collision_motion_samples(start, candidate, bool(self.hand_couplings)):
                     robot.state.q = configuration
-                    values = self.collision_checker.clearance_bounds(floor) if np.all(floor > 0) else None
+                    values = (
+                        self.collision_checker.clearance_bounds(floor)
+                        if self.collision_checker.can_bound and np.all(floor > 0)
+                        else None
+                    )
                     if values is None or np.any(values < floor):
-                        values = self.collision_checker.distances()
+                        values = self.collision_checker.clearances(self.collision_margin)
                     rejected = np.flatnonzero(values < floor - 1e-6)
                     if rejected.size:
                         index = rejected[0]
@@ -550,7 +554,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                     return self._output(candidate)
                 except RuntimeError:
                     robot.state.q = previous.copy()
-            distances = self.collision_checker.distances()
+            distances = self.collision_checker.clearances(self.collision_trigger)
             recovering = np.any(distances < self.collision_margin - 1e-6)
             self._update_collision_constraint(self.collision_constraint)
             recovery = self._add_recovery_constraint(distances) if recovering else None

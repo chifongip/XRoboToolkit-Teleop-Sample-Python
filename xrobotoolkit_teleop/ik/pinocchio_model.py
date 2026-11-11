@@ -8,7 +8,7 @@ import numpy as np
 import pinocchio as pin
 import coal
 
-from .model import Distance, model_description, validate_collision_links
+from .model import Distance, checked_pair_indices, model_description, validate_collision_links
 
 
 class PinocchioModel:
@@ -46,6 +46,12 @@ class PinocchioModel:
             objects=tuple(objects), collision_pairs=tuple((p.first, p.second) for p in self._geometry.collisionPairs)
         )
         self._geometry_data = pin.GeometryData(self._geometry)
+        self._pair_metadata = []
+        for pair in self._geometry.collisionPairs:
+            a, b = pair.first, pair.second
+            pa = self._geometry.geometryObjects[a].parentJoint
+            pb = self._geometry.geometryObjects[b].parentJoint
+            self._pair_metadata.append((a, b, pa + 1 if pa else 0, pb + 1 if pb else 0))
         for request in self._geometry_data.distanceRequests:
             request.enable_signed_distance = True
             request.gjk_initial_guess = coal.GJKInitialGuess.CachedGuess
@@ -100,19 +106,23 @@ class PinocchioModel:
 
     def distances(self):
         pin.computeDistances(self._native, self._data, self._geometry, self._geometry_data, self.state.q[7:])
-        result = []
-        for pair, distance in zip(self._geometry.collisionPairs, self._geometry_data.distanceResults):
-            a, b = pair.first, pair.second
-            pa, pb = self._geometry.geometryObjects[a].parentJoint, self._geometry.geometryObjects[b].parentJoint
-            result.append(
-                Distance(
-                    a,
-                    b,
-                    pa + 1 if pa else 0,
-                    pb + 1 if pb else 0,
-                    distance.min_distance,
-                    np.array(distance.getNearestPoint1()),
-                    np.array(distance.getNearestPoint2()),
-                )
-            )
-        return result
+        return [self._distance_record(i, d) for i, d in enumerate(self._geometry_data.distanceResults)]
+
+    def _distance_record(self, index, distance):
+        return Distance(
+            *self._pair_metadata[index],
+            distance.min_distance,
+            np.array(distance.getNearestPoint1()),
+            np.array(distance.getNearestPoint2()),
+        )
+
+    def distance_subset(self, pair_indices):
+        """Exact signed distances and copied witnesses, in requested pair order."""
+        indices = checked_pair_indices(pair_indices, len(self._pair_metadata))
+        if not indices:
+            return []
+        pin.updateGeometryPlacements(self._native, self._data, self._geometry, self._geometry_data, self.state.q[7:])
+        return [
+            self._distance_record(index, pin.computeDistance(self._geometry, self._geometry_data, index))
+            for index in indices
+        ]

@@ -124,7 +124,12 @@ class X2CollisionTests(unittest.TestCase):
         checker.clear_cache()
         q = robot.state.q.copy()
         native_distances = robot.distances
-        with patch.object(robot, "distances", side_effect=native_distances) as query:
+        # Exercise the exhaustive witness cache explicitly; subset cache
+        # transitions are covered for both adapters in test_collision_subset.
+        with (
+            patch.object(robot, "distance_subset", None),
+            patch.object(robot, "distances", side_effect=native_distances) as query,
+        ):
             checker.distances()
             distances, jacobian = checker.linearized_clearance(c.collision_trigger)
             self.assertEqual(query.call_count, 1)
@@ -469,6 +474,7 @@ class X2CollisionTests(unittest.TestCase):
             can_bound=True,
             pair_indices=c.collision_checker.pair_indices[:1],
             distances=distances,
+            clearances=lambda threshold: distances(),
             baseline=lambda margin: distances(),
             clearance_bounds=lambda floor: np.maximum(distances(), 0),
         )
@@ -625,7 +631,7 @@ class X2CollisionTests(unittest.TestCase):
         commands[actuator] = 0.1
         samples = []
 
-        def distances():
+        def distances(*, require_witnesses=False):
             samples.append(robot.state.q.copy())
             return np.full(c.collision_pair_count, 0.1)
 

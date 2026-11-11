@@ -313,7 +313,7 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
         robot = self.robot
         measured = {n: robot.get_joint(n) for n in self.backend.spec.joints}
         previous = {name: float(self.mj_data.ctrl[i]) for i, name in self.arm_actuators.items()}
-        distances = self.collision_checker.distances()
+        distances = self.collision_checker.clearances(self.collision_trigger)
         self._update_collision_constraint(self.collision_constraint)
         recovering = np.any(distances < self.collision_margin - 1e-6)
         recovery = self._add_recovery_constraint(distances) if recovering else None
@@ -497,7 +497,7 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
             if not all(np.all(np.isfinite(q)) for q in (measured, held, target)):
                 raise RuntimeError("non-finite X2 collision configuration")
             self.robot.state.q = measured
-            measured_distances = self.collision_checker.distances()
+            measured_distances = self.collision_checker.clearances(self.collision_margin)
             recovering = np.any(measured_distances < self.collision_margin - 1e-6)
             self.robot.state.q = held
             held_distances = self.collision_checker.baseline(self.collision_margin)
@@ -521,7 +521,7 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
                     self.robot.state.q = configuration
                     values = self.collision_checker.clearance_bounds(floor) if use_bounds else None
                     if values is None or np.any(values < floor):
-                        values = self.collision_checker.distances()
+                        values = self.collision_checker.clearances(self.collision_margin)
                     if np.any(values < floor - 1e-6):
                         index = int(np.argmin(values - floor))
                         a, b = map(int, self.collision_checker.pair_indices[index])

@@ -11,6 +11,7 @@ class CollisionChecker:
     """
 
     MAX_CACHE_ENTRIES = 128
+    BOUND_QUERY_GUARD = 1e-6
 
     def __init__(self, robot):
         self.robot = robot
@@ -34,6 +35,10 @@ class CollisionChecker:
 
     def clear_cache(self):
         self._distance_cache.clear()
+        self._clearance_cache = {}
+        self._subset_witness_key = None
+        self._subset_witnesses = {}
+        self._bounded_reference = None
         self._reference_distances = None
         self._reference_transforms = None
         self._witness_key = None
@@ -66,6 +71,63 @@ class CollisionChecker:
             self._reference_transforms = np.asarray(self.robot.collision_placements(self.robot.state.q))
         return values
 
+    def clearances(self, threshold, *, require_witnesses=False):
+        """Signed distances capped at threshold; certify distant pairs by bounds.
+
+        Capped results never enter the exact distance or exact motion-reference
+        cache. Unsupported bounds/subset queries return uncapped exact distances.
+        """
+        if not np.isfinite(threshold) or threshold <= 0:
+            raise ValueError("Collision clearance threshold must be finite and positive")
+        if not np.all(np.isfinite(self.robot.state.q)):
+            raise RuntimeError("non-finite collision configuration")
+        subset = getattr(self.robot, "distance_subset", None)
+        if not self.can_bound or not callable(subset):
+            return self.distances(require_witnesses=require_witnesses)
+        configuration_key = self.robot.state.q.tobytes()
+        if configuration_key in self._distance_cache:
+            return np.minimum(self.distances(require_witnesses=require_witnesses), threshold)
+        key = (configuration_key, float(threshold))
+        cached = self._clearance_cache.get(key)
+        if cached is not None and (not require_witnesses or key == self._subset_witness_key):
+            return cached
+        if not require_witnesses:
+            # A larger cap retains all exact values needed by a smaller one.
+            # Do not reuse its witness key: those records may have been evicted.
+            for (pose, cap), values in self._clearance_cache.items():
+                if pose == configuration_key and cap >= threshold:
+                    result = np.minimum(values, threshold)
+                    result.flags.writeable = False
+                    return result
+        guarded = threshold + self.BOUND_QUERY_GUARD
+        bounds = self.clearance_bounds(np.full(self.pair_count, guarded))
+        if not np.isfinite(bounds).all():
+            raise RuntimeError("non-finite collision bounds")
+        indices = np.flatnonzero(bounds < guarded)
+        records = subset(indices)
+        if len(records) != len(indices):
+            raise RuntimeError("Collision subset query returned incomplete results")
+        exact = np.array([record.min_distance for record in records])
+        if not np.isfinite(exact).all():
+            raise RuntimeError("non-finite collision distances")
+        values = np.full(self.pair_count, threshold, dtype=float)
+        values[indices] = np.minimum(exact, threshold)
+        values.flags.writeable = False
+        if len(self._clearance_cache) >= self.MAX_CACHE_ENTRIES:
+            self._clearance_cache.clear()
+        self._clearance_cache[key] = values
+        self._subset_witness_key = key
+        self._subset_witnesses = dict(zip(indices, records, strict=True))
+        if self._bounded_reference is None or threshold >= self._bounded_reference[0]:
+            # These are lower bounds, not exact distances. A trigger-sized cap
+            # retains enough slack to certify small subsequent path samples.
+            self._bounded_reference = (
+                threshold,
+                values,
+                np.asarray(self.robot.collision_placements(self.robot.state.q)),
+            )
+        return values
+
     def linearized_clearance(self, trigger):
         """Return nearby signed distances and their joint-velocity Jacobian.
 
@@ -73,13 +135,22 @@ class CollisionChecker:
         same witness-point linearization as Placo's self-collision constraint,
         including its reversed normal for penetrating shapes.
         """
-        values = self.distances(require_witnesses=True)
+        values = (
+            self.clearances(trigger, require_witnesses=True) if trigger > 0 else self.distances(require_witnesses=True)
+        )
         nearby = np.flatnonzero(values < trigger)
         robot = self.robot
+        robot.update_kinematics()
         jacobian = np.zeros((len(nearby), robot.model.nv))
         if nearby.size == 0:
             return values[nearby], jacobian
-        witnesses = [self._witnesses[int(index)] for index in nearby]
+        key = (robot.state.q.tobytes(), float(trigger))
+        witnesses_by_pair = (
+            self._subset_witnesses
+            if key == self._subset_witness_key and key[0] not in self._distance_cache
+            else self._witnesses
+        )
+        witnesses = [witnesses_by_pair[int(index)] for index in nearby]
         a = np.array([distance.pointA for distance in witnesses])
         b = np.array([distance.pointB for distance in witnesses])
         parents = np.array([(distance.parentA, distance.parentB) for distance in witnesses])
@@ -121,7 +192,7 @@ class CollisionChecker:
         return radii
 
     def clearance_bounds(self, floor):
-        """Conservatively certify distant primitives; query close pairs exactly.
+        """Bound primitive clearance without querying exact distances.
 
         AABB separation and projection-axis gaps bound unsigned primitive distance
         from below. Zero never certifies clearance or penetration recovery.
@@ -134,15 +205,20 @@ class CollisionChecker:
         rotation, center = transforms[:, :3, :3], transforms[:, :3, 3]
         a, b = self.pair_indices.T
         motion_bounds = None
+        references = []
         if self._reference_distances is not None:
-            reference = self._reference_transforms
+            references.append((self._reference_distances, self._reference_transforms))
+        if self._bounded_reference is not None:
+            references.append(self._bounded_reference[1:])
+        for reference_distances, reference in references:
             movement = np.linalg.norm(center - reference[:, :3, 3], axis=1)
             # A rigid shape moves by at most its center translation plus the
             # rotation chord at its enclosing radius. Spheres ignore rotation.
             chord = np.linalg.norm(rotation - reference[:, :3, :3], axis=(1, 2)) / np.sqrt(2)
             chord[self.shape_types == 2] = 0
             movement += self.bounding_radii * chord
-            motion_bounds = self._reference_distances - movement[a] - movement[b] - 1e-9
+            candidate = reference_distances - movement[a] - movement[b] - 1e-9
+            motion_bounds = candidate if motion_bounds is None else np.maximum(motion_bounds, candidate)
             if np.all(motion_bounds >= floor):
                 return motion_bounds
         world_half = self._support_radii(np.arange(len(rotation)), rotation)
@@ -166,6 +242,8 @@ class CollisionChecker:
         return np.maximum(bounds - 1e-9, 0)
 
     def baseline(self, margin):
+        if self.can_bound and callable(getattr(self.robot, "distance_subset", None)):
+            return self.clearances(margin)
         if self.robot.state.q.tobytes() in self._distance_cache:
             return self.distances()
         if self.can_bound:
