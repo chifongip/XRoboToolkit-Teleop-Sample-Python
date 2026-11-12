@@ -184,7 +184,7 @@ pose test. LeRobot cases are skipped unless `X2_TEST_LEROBOT=1` is set.
 From the RoboJuDo-Plus root, `python scripts/install_xrobotoolkit_teleop.py` creates `robojudo-xr` with Python 3.11,
 Placo and LeRobot, builds the matching symbolic bindings and registers them permanently. Activate that environment
 with `conda activate robojudo-xr`. Both IK methods run there; no manual `PYTHONPATH` setup is needed.
-See the [RoboJuDo installation guide](../../../docs/xrobotoolkit_teleop.md) for prerequisites, reuse and verification.
+See the [RoboJuDo setup and validation guide](robojudo_bridge.md#setup-and-validation) for prerequisites, reuse and verification.
 
 ## Manual native environment
 
@@ -329,3 +329,38 @@ LeRobot had larger position error in this replay. The comparison includes
 optimization, filtering, collision checks, and simulated servo tracking.
 These measurements cover this synthetic trajectory and the bundled scenes;
 they do not establish timing or tracking performance for every target.
+
+### IPOPT execution optimizations
+
+The solver keeps the G1 objective, chronological filter, `tol=1e-6`, and
+50-iteration limit. It caches separate graphs for problems with and without soft
+constraints, growing hard and soft capacities independently. A no-soft graph has
+no slack variables. Each supplied soft row gets slack bounded by `[0, 1000]`;
+padded entries are fixed at zero. Constant rows are retained and may require
+positive slack even when their Jacobian is zero.
+
+Accepted raw solutions seed later solves independently of the filtered reference.
+Multipliers are reused only for unchanged constraint blocks and matching joint or
+slack bounds, including when padded soft rows become supplied rows. HOME,
+reset, engagement changes, incompatible layouts, and applied-command changes above
+`1e-7` rad invalidate warm state. That comparison permits float32 acknowledgement
+noise; it does not relax the existing `1e-6` command-validation tolerance. Deep
+copies in proposal snapshots prevent failed or rejected proposals from committing
+warm state.
+
+Each graph has independent cold and warm `Opti.to_function()` callables. Cold
+initialization is used without a compatible accepted seed. The underlying NLP sets
+`error_on_fail=True`, and outputs must be successful, finite, and within joint
+bounds before filtering. Malformed, nonfinite, or non-real bounds and constraint arrays are rejected
+before graph allocation. Incompatible bounds also fail before graph selection. Graph compilation failures restore the previous graph;
+capacity growth can still introduce compilation latency.
+
+Run the focused regression checks in the native environment:
+
+```bash
+PYTHONPATH=.:tests X2_TEST_LEROBOT=1 python -m unittest test_lerobot_ik test_lerobot_optimization test_lerobot_benchmark test_ik_backends
+```
+
+See [solver benchmark results and reproduction commands](lerobot_solver_benchmark.md)
+for the measured speedup, test coverage, and timing limitations. Collision/path
+validation remains in place; collision processing still dominates recovery.

@@ -30,7 +30,7 @@ def initial_state(retargeter):
     return measured, home
 
 
-def replay(scenario, selective, steps, backend="lerobot"):
+def replay(scenario, selective, steps, backend="lerobot", observe_cycle=None):
     r = ExternalStateRetargeter(robot="x2_omnihand", ik_backend=backend)
     try:
         if not callable(getattr(r.robot, "distance_subset", None)):
@@ -113,6 +113,8 @@ def replay(scenario, selective, steps, backend="lerobot"):
             started = time.perf_counter()
             result = r.step(measured, previous, home, limits, intent="TRACK", frame=frame, control_dt=0.02)
             elapsed = 1000 * (time.perf_counter() - started)
+            if observe_cycle is not None:
+                observe_cycle(index, result)
             if index >= 6:
                 timings.append(elapsed)
                 collision_times.append(1000 * collision_seconds)

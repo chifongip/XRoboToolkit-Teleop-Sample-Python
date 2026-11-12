@@ -1,4 +1,4 @@
-# External-state RoboJuDo bridge
+# RoboJuDo-Plus bridge
 
 Run the bridge in the XR environment and RoboJuDo's existing X2 pipeline in its runtime environment:
 
@@ -19,55 +19,16 @@ includes observed noncontrolled joints instead of freezing them at neutral. Arm 
 commands, while collision checks sample paths from both measured and previously commanded positions.
 Targets are quantized to float32 before the final checks. HOME works without an XR client.
 
-## Layers and ownership
+## Guide map
 
-- `integrations/robojudo.py`: bounded ZMQ polling, schema validation, session/generation handling, deadlines,
-  command acknowledgement, XR sampling, diagnostics, and cleanup.
-- `integrations/retargeter.py`: clutch references, target transforms, bounds, collision constraints and path checks,
-  HOME, and pending IK proposals. It uses the backend API without accessing native solver objects.
-- `integrations/robot_profiles`: typed robot descriptions and lazy profile factories. X2 owns its deployment URDF,
-  measured/controlled joints, frames, group mappings, and model limits here.
-- `ik`: registered solver implementations and adapters, also used by standalone simulation.
+- [Setup and validation](#setup-and-validation)
+- [OmniHand profile](#omnihand-profile)
+- [Runtime behavior and diagnostics](#runtime-behavior)
+- [Layers and ownership](#layers-and-ownership)
+- [Add a robot](#add-a-robot)
+- [Collision implementation and benchmarks](#shared-collision-checking)
 
-There is at most one outstanding command. Solver history remains uncommitted while waiting for feedback. The bridge
-commits only when fresh feedback has the same session/generation, exactly the next command ID, and the exact outgoing
-joint positions within the original acknowledgement budget. Later feedback cannot extend that budget. This acknowledges successful environment submission, not physical
-actuator arrival. A mismatch, timeout, outage, reset, failed send, or computation overrun discards the proposal and
-rebases the clutch/history. Reconnection and engagement follow the existing release requirements.
-The schema stays at version 1 and robot-owned deadlines remain authoritative. Only one publisher may own the endpoint.
-
-## Add a robot
-
-1. Add a module exposing a `load_profile(settings)` context manager. Yield a `RobotProfile` containing a `RobotSpec`,
-   the complete observed joint set, disjoint `ControlGroup` entries, reference frame, and per-joint velocity limits.
-   Each group names its controlled joints, end-effector frame, XR controller device and grip key.
-   Choose a reference frame carried by observed, uncontrolled joints so it stays fixed within each IK solve. Group keys are
-   arbitrary; they also label target poses. Initial positions cover all observed joints. The bridge replaces the
-   controlled posture reference with the validated defaults supplied by RoboJuDo before solving.
-2. Supply a matching URDF and explicit collision-pair file using geometry supported by the shared model adapters.
-   If generating files, keep them alive for the entire context. Backend cleanup happens before context exit.
-   Current adapters support scalar fixed-base joints and expose the shared leading world-pose layout.
-3. Add a lazy `module:factory` entry in `PROFILES`. No bridge dispatch changes are necessary. XR input assumes native
-   Y-up coordinates and robot reference axes X-forward, Y-left, Z-up; adapt device poses before this interface for
-   other coordinate conventions. The current clutch uses headset heading, one controller/grip per group, and a
-   configured home button. Other input/control modalities need a separate mapping implementation.
-4. Configure RoboJuDo's existing upper-body controller with the same controlled joints and ensure feedback supplies
-   every observed joint. RoboJuDo's existing target viewer supports X2's `left`/`right` labels relative to
-   `torso_link`; disable `visualize_targets` for other layouts until their viewer is adapted. This affects display,
-   not joint-command validation. Use schema version 1 for arm-only profiles. The bundled `x2_omnihand` profile
-   uses version 2 for fingers; base commands remain outside this integration.
-5. Test feedback-name validation, moving reference frames, clutch mapping, limits/collision checks, HOME, and
-   acknowledgement rollback. `tests/test_robojudo_profiles.py` demonstrates a one-joint profile with non-X2 names,
-   a custom device mapping, and a stateful test solver.
-
-Select a compatible registered IK method independently of the robot profile. Methods must support pose tracking,
-joint-target HOME and linear constraints. LeRobot now sizes optimization to the configured scalar controlled joints.
-Placo omits its 6D manipulability task for groups with fewer than six controlled joints, avoiding a singular objective.
-LeRobot uses forward differentiation of its pose-error function to avoid NaN gradients from inactive rotation-log
-branches at axis-aligned poses; its objective and filter are unchanged.
-Adding another method uses `ik/registry.py`; adding another robot uses `robot_profiles/PROFILES`.
-
-## Dependencies and validation
+## Setup and validation
 
 From a RoboJuDo-Plus checkout, create the single teleop environment with:
 
@@ -80,7 +41,7 @@ Setup installs Placo and LeRobot together under Python 3.11, builds compatible P
 and registers them permanently. It keeps RoboJuDo in its existing environment. An existing target requires
 `--reuse`; use `--name NAME` for a different name. Conda and `g++` are prerequisites. The source archive is
 checksum-verified, and logs/manifest remain under the target prefix's `share/robojudo-xr` directory.
-See the [RoboJuDo setup guide](../../../docs/xrobotoolkit_teleop.md) for the complete installation flow.
+See the [RoboJuDo setup guide](https://github.com/chifongip/RoboJuDo-Plus/blob/main/docs/xrobotoolkit_teleop.md) for the complete installation flow.
 
 Bare `pip install -e ".[x2]"` still installs Placo dependencies only. For a standalone source installation outside
 RoboJuDo, the [manual native setup guide](lerobot_ik.md) describes the build process.
@@ -114,6 +75,71 @@ Run the full native suite from this submodule's root with the optional dependenc
 PYTHONPATH=. X2_TEST_LEROBOT=1 python -m unittest discover -s tests
 ```
 
+## Runtime behavior
+
+The `x2` extra also provides a headless bridge using live measured robot state:
+
+```bash
+python -m xrobotoolkit_teleop.integrations.robojudo_x2 --help
+python -m xrobotoolkit_teleop.integrations.robojudo_x2
+```
+
+Run it in this environment alongside RoboJuDo-Plus's `x2_xrobotoolkit` simulation
+preset or `x2_xrobotoolkit_real` AimDK preset in the robot environment. The bridge
+requires no RoboJuDo Python imports. It binds arm commands on port 8559 and
+subscribes to measured-state feedback on port 8571 by default; both endpoints
+are configurable. Start PC Service and headset streaming before enabling tracking.
+
+The bridge observes all 31 robot joints and commands only the 14 arm joints.
+Hand targets follow the measured torso, while grip release holds the last
+commanded targets. It uses the same default settings and collision helpers as the
+standalone demo: arm cap 8 rad/s, return cap 1 rad/s, 50 Hz, scale 1.0, collision
+margin 0.02 m, activation distance 0.08 m, and XR timeout 0.25 s. URDF/deployment
+limits remain authoritative; no additional receiver EMA is used.
+
+Tracking holds on stale input and automatically rebases controller references
+when fresh data returns, discarding motion made during a transient hold. Startup,
+explicit mode changes, and a restarted bridge require grip release before engagement.
+IK starts from acknowledged arm targets; measured servo lag cannot pin an ungripped
+arm outside its command speed window. Placo combines the configured default posture with
+its upstream manipulability objective; LeRobot retains its joint-angle objective and filter.
+These methods can select different redundant-joint postures for matching hand poses.
+Nonlinear collision rejection tries bounded shorter steps, each checked against
+both measured and acknowledged configurations. Explicit teleop disable requests
+a checked return to defaults, which can run without XR tracking. If the bridge is offline the robot retains
+that request and holds until it recovers. XR `Y` held also requests a return;
+loss of XR freshness ends that button-driven return. Walking, runtime modes,
+and recording controls remain in RoboJuDo. For finger control, select the
+[OmniHand profile](#omnihand-profile).
+
+The reusable `common.x2_arm_retargeter.X2ArmRetargeter` accepts measured joint
+positions, acknowledged arm targets, defaults, limits, intent, and optional
+`X2XRFrame` input. It returns a complete float32 arm proposal or `None` to hold.
+Direct users must call `acknowledge(applied_positions)` after confirmed application, or `reject()`
+on rejection; publishing a proposal does not commit backend history. The bridge manages this lifecycle automatically.
+It restores body DOFs in the bundled model for observation, masks them during
+IK, and checks the final measured-to-target and previous-to-target paths without
+advancing physics. Robot-owned session, generation, feedback, and command IDs
+prevent old proposals from executing after mode changes or restarts.
+
+## Timing diagnostics
+
+For timing diagnostics, run the bridge with `--xr-diagnostics`. It reports SDK
+observations and the latest policy, stepping, retargeting, and acknowledgement durations.
+The measurement-age lower bound excludes transport and queueing; RoboJuDo performs
+the authoritative deadline check using its own clock.
+
+To measure SDK updates without IK or ZMQ, stop the bridge and other SDK clients,
+leave PC Service/headset streaming, and run:
+
+```bash
+python -m xrobotoolkit_teleop.integrations.xr_receive_rate --duration 30 --csv /tmp/xr-rate.csv
+```
+
+This samples timestamps at 200 Hz; it does not count every network packet.
+It reports the observed rate, recent gap p95 (last 4096 updates), lifetime maximum
+gaps, and timeout episodes, without comparing headset and host clocks.
+
 ## OmniHand profile
 
 Select `--robot x2_omnihand` with either backend. This profile observes 69 joints, optimizes 14 arm joints,
@@ -130,7 +156,56 @@ worker lifecycle, hardware acceptance, and the additional MuJoCo model.
 Run `PYTHONPATH=. python -m unittest discover -s tests -p test_robojudo_omnihand.py`; set
 `BRIDGE_TEST_BACKEND=lerobot` to exercise the alternative solver.
 
-### Shared collision checking
+## Layers and ownership
+
+- `integrations/robojudo.py`: bounded ZMQ polling, schema validation, session/generation handling, deadlines,
+  command acknowledgement, XR sampling, diagnostics, and cleanup.
+- `integrations/retargeter.py`: clutch references, target transforms, bounds, collision constraints and path checks,
+  HOME, and pending IK proposals. It uses the backend API without accessing native solver objects.
+- `integrations/robot_profiles`: typed robot descriptions and lazy profile factories. X2 owns its deployment URDF,
+  measured/controlled joints, frames, group mappings, and model limits here.
+- `ik`: registered solver implementations and adapters, also used by standalone simulation.
+
+There is at most one outstanding command. Solver history remains uncommitted while waiting for feedback. The bridge
+commits only when fresh feedback has the same session/generation, exactly the next command ID, and the exact outgoing
+joint positions within the original acknowledgement budget. Later feedback cannot extend that budget. This acknowledges successful environment submission, not physical
+actuator arrival. A mismatch, timeout, outage, reset, failed send, or computation overrun discards the proposal and
+rebases the clutch/history. Reconnection and engagement follow the existing release requirements.
+Arm-only profiles use schema version 1; the OmniHand profile uses version 2. Robot-owned deadlines remain authoritative. Only one publisher may own the endpoint.
+
+
+## Add a robot
+
+1. Add a module exposing a `load_profile(settings)` context manager. Yield a `RobotProfile` containing a `RobotSpec`,
+   the complete observed joint set, disjoint `ControlGroup` entries, reference frame, and per-joint velocity limits.
+   Each group names its controlled joints, end-effector frame, XR controller device and grip key.
+   Choose a reference frame carried by observed, uncontrolled joints so it stays fixed within each IK solve. Group keys are
+   arbitrary; they also label target poses. Initial positions cover all observed joints. The bridge replaces the
+   controlled posture reference with the validated defaults supplied by RoboJuDo before solving.
+2. Supply a matching URDF and explicit collision-pair file using geometry supported by the shared model adapters.
+   If generating files, keep them alive for the entire context. Backend cleanup happens before context exit.
+   Current adapters support scalar fixed-base joints and expose the shared leading world-pose layout.
+3. Add a lazy `module:factory` entry in `PROFILES`. No bridge dispatch changes are necessary. XR input assumes native
+   Y-up coordinates and robot reference axes X-forward, Y-left, Z-up; adapt device poses before this interface for
+   other coordinate conventions. The current clutch uses headset heading, one controller/grip per group, and a
+   configured home button. Other input/control modalities need a separate mapping implementation.
+4. Configure RoboJuDo's existing upper-body controller with the same controlled joints and ensure feedback supplies
+   every observed joint. RoboJuDo's existing target viewer supports X2's `left`/`right` labels relative to
+   `torso_link`; disable `visualize_targets` for other layouts until their viewer is adapted. This affects display,
+   not joint-command validation. Use schema version 1 for arm-only profiles. The bundled `x2_omnihand` profile
+   uses version 2 for fingers; base commands remain outside this integration.
+5. Test feedback-name validation, moving reference frames, clutch mapping, limits/collision checks, HOME, and
+   acknowledgement rollback. `tests/test_robojudo_profiles.py` demonstrates a one-joint profile with non-X2 names,
+   a custom device mapping, and a stateful test solver.
+
+Select a compatible registered IK method independently of the robot profile. Methods must support pose tracking,
+joint-target HOME and linear constraints. LeRobot now sizes optimization to the configured scalar controlled joints.
+Placo omits its 6D manipulability task for groups with fewer than six controlled joints, avoiding a singular objective.
+LeRobot uses forward differentiation of its pose-error function to avoid NaN gradients from inactive rotation-log
+branches at axis-aligned poses; its objective and filter are unchanged.
+Adding another method uses `ik/registry.py`; adding another robot uses `robot_profiles/PROFILES`.
+
+## Shared collision checking
 
 Both model adapters support optional `distance_subset(pair_indices)` queries, returning exact signed
 distances and copied witnesses in requested pair order. The checker uses conservative primitive bounds to
