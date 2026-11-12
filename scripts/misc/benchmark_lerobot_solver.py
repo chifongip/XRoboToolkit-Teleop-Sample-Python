@@ -6,6 +6,7 @@ baseline. Each output line describes one scenario, variant, and repeat.
 
 import argparse
 from contextlib import ExitStack
+import importlib.util
 import json
 from pathlib import Path
 import time
@@ -14,8 +15,15 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts.misc.benchmark_bridge_collisions import replay
 from xrobotoolkit_teleop.ik import lerobot_backend, lerobot_solver
+
+# Resolve the sibling helper by file: ROS also installs a top-level scripts package.
+_replay_spec = importlib.util.spec_from_file_location(
+    "_benchmark_bridge_collisions", Path(__file__).with_name("benchmark_bridge_collisions.py")
+)
+_replay_module = importlib.util.module_from_spec(_replay_spec)
+_replay_spec.loader.exec_module(_replay_module)
+replay = _replay_module.replay
 
 
 def measure(scenario, variant, steps, baseline):

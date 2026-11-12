@@ -1,12 +1,18 @@
 """Benchmark accounting checks without optional native solver dependencies."""
 
+import importlib.util
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import numpy as np
 
-from scripts.misc import benchmark_lerobot_solver as benchmark
+BENCHMARK_PATH = Path(__file__).resolve().parents[1] / "scripts/misc/benchmark_lerobot_solver.py"
+SPEC = importlib.util.spec_from_file_location("benchmark_lerobot_solver", BENCHMARK_PATH)
+benchmark = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(benchmark)
 
 
 class FakeSolver:
@@ -26,6 +32,12 @@ class FakeSolver:
 
 
 class LeRobotBenchmarkTests(unittest.TestCase):
+    def test_benchmark_import_ignores_foreign_scripts_package(self):
+        module = importlib.util.module_from_spec(SPEC)
+        with patch.dict(sys.modules, {"scripts": None}):
+            SPEC.loader.exec_module(module)
+        self.assertTrue(callable(module.replay))
+
     def measure(self, attempts=1, held=False):
         def replay(scenario, selective, steps, backend, observe_cycle):
             solver = benchmark.lerobot_backend.LeRobotIKSolver()
