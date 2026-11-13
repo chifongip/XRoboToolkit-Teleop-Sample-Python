@@ -190,35 +190,54 @@ class RoboJuDoBridge:
         elapsed = now - self._xr_report_at
         if elapsed < 2.0:
             return
-        age = None if self._xr_changed_at is None else round(now - self._xr_changed_at, 3)
+        age = "unknown" if self._xr_changed_at is None else f"{1000 * (now - self._xr_changed_at):.0f} ms"
+
+        def inputs(values):
+            result = []
+            for side in ("left", "right"):
+                try:
+                    result.append(f"{_number(values.get(side)):.2f}")
+                except (TypeError, ValueError, OverflowError):
+                    result.append("?")
+            return "/".join(result)
+
         logger.info(
-            "XR SDK: timestamp=%s, age_s=%s, observed_updates_hz=%.1f, grips=%s, triggers=%s, robot_intent=%s",
-            self._xr_timestamp,
-            age,
+            "XR: %.1f Hz, age=%s, intent=%s; grips=%s, triggers=%s (L/R)",
             self._xr_updates / elapsed,
-            self._xr_grips,
-            self._xr_triggers,
+            age,
             getattr(self, "_robot_intent", "no feedback"),
+            inputs(self._xr_grips),
+            inputs(self._xr_triggers),
         )
-        latest = {
-            key: round(value, 1) for key, value in self._timing_ms.items() if key != "ack_wait" or self._ack_count
-        }
-        logger.info("Feedback measurement ages and execution durations (ms): %s", latest)
-        distributions = {
-            name: {
-                "count": len(values),
-                **dict(zip(("p50", "p95", "max"), np.percentile(values, (50, 95, 100)).round(2).tolist(), strict=True)),
-            }
-            for name, values in self._timing_samples.items()
-            if values
-        }
+        oldest = self._feedback_details.get("oldest_joint")
+        source = "unknown"
+        if isinstance(oldest, str):
+            source = "left hand" if oldest.startswith("L_") else "right hand" if oldest.startswith("R_") else "body"
+        samples = self._timing_samples.get("feedback_age_at_publish")
+        if self._feedback_details.get("valid") is False:
+            summary = f"unavailable ({source})"
+        elif samples:
+            summary = f"age={samples[-1]:.1f} ms ({source}), p95={np.percentile(samples, 95):.1f} ms"
+        else:
+            summary = "waiting for measurements"
         logger.info(
-            "Feedback timing distributions (ms): %s; proposals=%d, acknowledgements=%d; sources=%s",
-            distributions,
+            "Feedback: %s; sent=%d, acked=%d",
+            summary,
             self._proposal_count,
             self._ack_count,
-            self._feedback_details,
         )
+        stages = []
+        for label, name in (
+            ("policy", "policy"),
+            ("env_step", "env_step"),
+            ("retarget", "retarget"),
+            ("ack_wait", "ack_wait"),
+        ):
+            values = self._timing_samples.get(name)
+            if values:
+                stages.append(f"{label}={np.percentile(values, 95):.1f}")
+        if stages:
+            logger.info("Processing p95 (ms): %s", ", ".join(stages))
         self._timing_samples.clear()
         self._proposal_count = self._ack_count = 0
         self._xr_updates = 0

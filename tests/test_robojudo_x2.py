@@ -413,9 +413,37 @@ class BridgeTests(unittest.TestCase):
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
         self.assertNotIn("ack_wait", logs.output[1])
-        self.assertIn("acknowledgements=0", logs.output[2])
-        self.assertIn("'p95': 1.0", logs.output[2])
+        self.assertIn("sent=0, acked=0", logs.output[1])
+        self.assertIn("Processing p95 (ms): retarget=1.0", logs.output[2])
         self.assertEqual(self.bridge._timing_samples, {})
+
+    def test_feedback_log_is_a_compact_summary_without_raw_dictionaries(self):
+        self.bridge._feedback_details = {"oldest_joint": "R_thumb_roll_joint", "valid": True, "snapshot_sequence": 4258}
+        self.bridge._record_timing("feedback_age_at_publish", 21.3)
+        self.bridge._record_timing("body_snapshot", 0.1)
+        self.bridge._record_timing("hand_snapshot", 0.2)
+        self.bridge._record_timing("previous_feedback_build", 0.2)
+        self.bridge._record_timing("previous_feedback_encode_send", 0.6)
+        self.bridge._record_timing("policy", 2.7)
+        self.bridge._record_timing("env_step", 1.8)
+        self.bridge._record_timing("retarget", 1.3)
+        with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+        self.assertEqual(len(logs.output), 3)
+        self.assertIn("Feedback: age=21.3 ms (right hand), p95=21.3 ms; sent=0, acked=0", logs.output[1])
+        self.assertIn("Processing p95 (ms): policy=2.7, env_step=1.8, retarget=1.3", logs.output[2])
+        self.assertNotIn("{", " ".join(logs.output))
+        self.assertNotIn("snapshot_sequence", " ".join(logs.output))
+
+    def test_unavailable_feedback_log_does_not_reuse_a_previous_age(self):
+        self.bridge._feedback_details = {"valid": False, "oldest_joint": "L_index_mcp_joint"}
+        self.bridge._record_timing("feedback_age_at_publish", 5.0)
+        with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+        self.assertIn("Feedback: unavailable (left hand)", logs.output[1])
+        self.assertNotIn("age=5.0", logs.output[1])
 
     def setUp(self):
         with patch("zmq.Context.instance", return_value=MemoryContext()):
@@ -552,10 +580,19 @@ class BridgeTests(unittest.TestCase):
             self.bridge._xr_frame()
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
-        self.assertIn("timestamp=123", logs.output[0])
-        self.assertIn("age_s=2.0", logs.output[0])
-        self.assertIn("observed_updates_hz=0.5", logs.output[0])
-        self.assertIn("'left': 0.95", logs.output[0])
+        self.assertIn("XR: 0.5 Hz", logs.output[0])
+        self.assertIn("age=2000 ms", logs.output[0])
+        self.assertIn("grips=0.95/0.00", logs.output[0])
+        self.assertNotIn("timestamp=", logs.output[0])
+
+    def test_acknowledgement_timing_is_shown_when_commands_complete(self):
+        self.bridge._record_timing("ack_wait", 25.0)
+        self.bridge._proposal_count = self.bridge._ack_count = 1
+        with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+        self.assertIn("sent=1, acked=1", logs.output[1])
+        self.assertIn("Processing p95 (ms): ack_wait=25.0", logs.output[2])
 
     def test_waits_for_acknowledgement_instead_of_resending_old_baseline(self):
         self.bridge.feedback.messages.append(self.state)
