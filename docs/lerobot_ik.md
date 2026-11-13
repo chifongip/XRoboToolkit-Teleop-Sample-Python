@@ -333,9 +333,11 @@ they do not establish timing or tracking performance for every target.
 ### IPOPT execution optimizations
 
 The solver keeps the G1 objective, chronological filter, `tol=1e-6`, and
-50-iteration limit. It caches separate graphs for problems with and without soft
-constraints, growing hard and soft capacities independently. A no-soft graph has
-no slack variables. Each supplied soft row gets slack bounded by `[0, 1000]`;
+50-iteration limit. It caches separate graphs for each combination of hard and
+soft collision rows, growing nonempty capacities independently. Empty hard
+constraints allocate zero collision inequalities, including after switching back
+from a larger collision graph. Joint position and command velocity bounds remain
+active. A no-soft graph has no slack variables. Each supplied soft row gets slack bounded by `[0, 1000]`;
 padded entries are fixed at zero. Constant rows are retained and may require
 positive slack even when their Jacobian is zero.
 
@@ -346,12 +348,21 @@ reset, engagement changes, incompatible layouts, and applied-command changes abo
 `1e-7` rad invalidate warm state. That comparison permits float32 acknowledgement
 noise; it does not relax the existing `1e-6` command-validation tolerance. Deep
 copies in proposal snapshots prevent failed or rejected proposals from committing
-warm state.
+warm state. Snapshots copy the known arrays explicitly. During proposals the
+backend owns rollback, avoiding a redundant solver snapshot; direct solver calls
+retain their own rollback. LeRobot skips the adapter's pre-solve kinematics update
+because its symbolic solver uses its own model. The final adapter refresh remains
+mandatory on success and failure, and numeric collision Jacobians are computed
+when requested.
 
 Each graph has independent cold and warm `Opti.to_function()` callables. Cold
 initialization is used without a compatible accepted seed. The underlying NLP sets
 `error_on_fail=True`, and outputs must be successful, finite, and within joint
-bounds before filtering. Malformed, nonfinite, or non-real bounds and constraint arrays are rejected
+bounds before filtering. The objective gradient and Lagrangian Hessian are
+differentiated on the MX graph first, then expanded into CasADi functions supplied
+to IPOPT. Blanket NLP `expand=True` must not be substituted: it can bypass the
+rotation error's forward-AD policy and produce NaN gradients in obstructed homing.
+Malformed, nonfinite, or non-real bounds and constraint arrays are rejected
 before graph allocation. Incompatible bounds also fail before graph selection. Graph compilation failures restore the previous graph;
 capacity growth can still introduce compilation latency.
 
@@ -364,3 +375,21 @@ PYTHONPATH=.:tests X2_TEST_LEROBOT=1 python -m unittest test_lerobot_ik test_ler
 See [solver benchmark results and reproduction commands](lerobot_solver_benchmark.md)
 for the measured speedup, test coverage, and timing limitations. Collision/path
 validation remains in place; collision processing still dominates recovery.
+
+For collision-disabled retarget latency, run the synthetic external-state replay
+from the repository root in the working native environment:
+
+```bash
+PYTHONPATH=. python scripts/misc/benchmark_lerobot_latency.py --output /tmp/lerobot-latency.json
+```
+
+This sends no robot commands and needs no headset. It reports median/p95/maximum
+retarget time, 20 ms overruns, optimizer time, warm-start use, tracking errors, and
+command-bound failures across stationary fingers, closing fingers, and servo lag.
+Six warmup frames are excluded; acknowledgements and diagnostic FK are outside
+timing. Use `--robot x2` for arms only. To compare against an earlier compatible
+Git revision, add `--baseline-ref PRE_CHANGE_COMMIT`; this loads that revision's
+solver, transaction backend, and numeric adapter without changing the checkout.
+Comparisons alternate execution order and reject command differences above
+`1e-5` rad. Jetson measurements must use the board's native environment and power
+configuration; desktop results do not establish a 50 Hz timing guarantee.

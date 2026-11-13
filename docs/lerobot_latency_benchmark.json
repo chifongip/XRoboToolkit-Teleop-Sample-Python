@@ -1,0 +1,640 @@
+{
+  "machine": "x86_64",
+  "python": "3.11.18",
+  "casadi": "3.6.7",
+  "baseline_ref": "HEAD",
+  "robot": "x2_omnihand",
+  "records": [
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.281868459656835,
+        "p95": 5.107248574495315,
+        "max": 8.513248059898615
+      },
+      "optimizer_ms": {
+        "median": 3.562592901289463,
+        "p95": 4.2518932721577585
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.14186601806432,
+        "p95": 2.2189403185620904,
+        "max": 2.298370935022831
+      },
+      "optimizer_ms": {
+        "median": 1.510343048721552,
+        "p95": 1.5717398142442107
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.135944531299174,
+        "p95": 4.38954628771171,
+        "max": 4.562244983389974
+      },
+      "optimizer_ms": {
+        "median": 3.4344239393249154,
+        "p95": 3.6265056463889778
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.0603130105882883,
+        "p95": 2.1832038648426533,
+        "max": 2.3839890491217375
+      },
+      "optimizer_ms": {
+        "median": 1.4447035500779748,
+        "p95": 1.5355593874119222
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.133591544814408,
+        "p95": 5.252833501435816,
+        "max": 5.574824986979365
+      },
+      "optimizer_ms": {
+        "median": 3.4291030606254935,
+        "p95": 4.43439946975559
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.094294992275536,
+        "p95": 2.2091846563853323,
+        "max": 2.3554000072181225
+      },
+      "optimizer_ms": {
+        "median": 1.4740685001015663,
+        "p95": 1.5707173966802657
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 0,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.0623410819098353,
+        "p95": 2.1896244259551167,
+        "max": 2.46689491905272
+      },
+      "optimizer_ms": {
+        "median": 1.4602146111428738,
+        "p95": 1.5624621184542775
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.027917515486479,
+        "p95": 4.229949845466763,
+        "max": 4.552581114694476
+      },
+      "optimizer_ms": {
+        "median": 3.35355952847749,
+        "p95": 3.5115490900352597
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.0688314689323306,
+        "p95": 2.18223393894732,
+        "max": 2.2680340334773064
+      },
+      "optimizer_ms": {
+        "median": 1.4512829948216677,
+        "p95": 1.5422587050125003
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.234647494740784,
+        "p95": 5.322485789656639,
+        "max": 5.801140097901225
+      },
+      "optimizer_ms": {
+        "median": 3.503891406580806,
+        "p95": 4.467683425173163
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.063991501927376,
+        "p95": 2.2410862962715323,
+        "max": 2.391071990132332
+      },
+      "optimizer_ms": {
+        "median": 1.458185026422143,
+        "p95": 1.5907259192317724
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.023746005259454,
+        "p95": 4.230149055365473,
+        "max": 4.518209025263786
+      },
+      "optimizer_ms": {
+        "median": 3.34397004917264,
+        "p95": 3.534902026876807
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 1,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.042701446451247,
+        "p95": 4.31798561476171,
+        "max": 4.573662998154759
+      },
+      "optimizer_ms": {
+        "median": 3.3630180405452847,
+        "p95": 3.58469751663506
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "stationary",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.075214055366814,
+        "p95": 2.199095254763961,
+        "max": 2.278077881783247
+      },
+      "optimizer_ms": {
+        "median": 1.4640995068475604,
+        "p95": 1.5661853831261396
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.056249978020787,
+        "p95": 4.241881193593144,
+        "max": 4.505857825279236
+      },
+      "optimizer_ms": {
+        "median": 3.365351469255984,
+        "p95": 3.536575986072421
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "closing",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.066629007458687,
+        "p95": 2.181071264203638,
+        "max": 2.3244128096848726
+      },
+      "optimizer_ms": {
+        "median": 1.449246541596949,
+        "p95": 1.5427312348037958
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 4.033042467199266,
+        "p95": 4.287102713715285,
+        "max": 4.450574051588774
+      },
+      "optimizer_ms": {
+        "median": 3.351764054968953,
+        "p95": 3.5693264682777226
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        16,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425748493167,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681782678904,
+        "max": 0.01171583285217227
+      },
+      "variant": "baseline",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    },
+    {
+      "scenario": "servo_lag",
+      "steps": 200,
+      "retarget_ms": {
+        "median": 2.0874629262834787,
+        "p95": 2.198855741880834,
+        "max": 2.3015670012682676
+      },
+      "optimizer_ms": {
+        "median": 1.473933458328247,
+        "p95": 1.5668687410652637
+      },
+      "iterations": {
+        "median": 3.0,
+        "p95": 3.0
+      },
+      "warm_frames": 200,
+      "over20_frames": 0,
+      "failed_cycles": 0,
+      "capacities": [
+        0,
+        0
+      ],
+      "position_error_m": {
+        "mean": 0.005642425799764808,
+        "max": 0.006262774500490461
+      },
+      "orientation_error_rad": {
+        "mean": 0.010400681929115923,
+        "max": 0.01171583285217227
+      },
+      "variant": "current",
+      "repeat": 2,
+      "max_command_difference_rad": 5.960464477539063e-08
+    }
+  ],
+  "baseline_commit": "74ac6b2de0e516892524ac86c644981192500d5f"
+}

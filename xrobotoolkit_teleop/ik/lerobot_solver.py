@@ -5,7 +5,6 @@ This module intentionally imports the optional native dependencies only on use.
 """
 
 from collections import deque
-from copy import deepcopy
 
 import numpy as np
 
@@ -238,7 +237,7 @@ class G1IKSolver:
 
 
 class LeRobotIKSolver(G1IKSolver, IKSolver):
-    """Transactional primal/dual warm starts and two cached NLP variants."""
+    """Transactional warm starts and cached graphs for collision row layouts."""
 
     # Private switches support controlled benchmark comparisons, not runtime UI.
     _warm_starts = True
@@ -253,15 +252,16 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
         self.spec = spec
         super().__init__(spec.urdf_path, spec.joints, spec.limits, spec.frames, spec.groups)
         self._warm = None
+        self._backend_owns_rollback = False
         self._variants = {}
         self._select_optimizer(0, 0)
 
     def _select_optimizer(self, hard_rows, soft_rows):
         if not self._compact_slack:
             soft_rows = max(self._INITIAL_CAPACITY, hard_rows, soft_rows)
-        kind = bool(soft_rows)
+        kind = (bool(hard_rows), bool(soft_rows))
         cached = self._variants.get(kind)
-        hard_capacity = max(self._INITIAL_CAPACITY, 2 ** (max(1, hard_rows) - 1).bit_length())
+        hard_capacity = max(self._INITIAL_CAPACITY, 2 ** (hard_rows - 1).bit_length()) if hard_rows else 0
         soft_capacity = 2 ** (soft_rows - 1).bit_length() if soft_rows else 0
         # Keep one high-water capacity per variant; switches never rebuild a graph.
         if cached is not None:
@@ -310,7 +310,8 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
         self.home = self.opti.parameter(self.model.nq)
         self.hard_A = self.opti.parameter(hard_capacity, self.model.nq)
         self.hard_b = self.opti.parameter(hard_capacity)
-        self.opti.subject_to(self.hard_A @ self.q <= self.hard_b)
+        if hard_capacity:
+            self.opti.subject_to(self.hard_A @ self.q <= self.hard_b)
         objective = ca.if_else(self.mode > 0.5, ca.sumsqr(self.q - self.home), self.tracking_cost, True)
         inputs = [
             self.reference,
@@ -341,12 +342,24 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
         self._inputs = inputs
         self._guesses = guesses + [self.opti.lam_g]
         self._outputs = outputs + [self.opti.lam_g]
+        # Differentiate the MX graph before expansion. Expanding the entire NLP
+        # first bypasses errors' forward-AD policy and can produce NaN gradients
+        # in Pinocchio log3's inactive branches during obstructed homing.
+        x, p = self.opti.x, self.opti.p
+        lam_f = ca.MX.sym("lam_f")
+        lam_g = ca.MX.sym("lam_g", self.opti.ng)
+        gradient = ca.gradient(self.opti.f, x)
+        hessian = ca.hessian(lam_f * self.opti.f + ca.dot(lam_g, self.opti.g), x)[0]
+        self._derivative_options = {
+            "grad_f": ca.Function("nlp_grad_f", [x, p], [self.opti.f, gradient]).expand(),
+            "hess_lag": ca.Function("nlp_hess_l", [x, p, lam_f, lam_g], [ca.triu(hessian)]).expand(),
+        }
         # Use an independent Opti copy: to_function caches its solver, so changing
         # options on an already converted Opti can silently reuse the old solver.
         self._cold_opti = self.opti.copy()
-        self._cold_opti.solver("ipopt", self._solver_options())
+        self._cold_opti.solver("ipopt", dict(self._solver_options(), **self._derivative_options))
         self._cold_optimizer = self._cold_opti.to_function("solve_ik_cold", self._inputs + self._guesses, self._outputs)
-        self.opti.solver("ipopt", self._solver_options(warm=self._warm_starts))
+        self.opti.solver("ipopt", dict(self._solver_options(warm=self._warm_starts), **self._derivative_options))
         self._optimizer = self.opti.to_function("solve_ik_warm", self._inputs + self._guesses, self._outputs)
         names = (
             "opti",
@@ -374,6 +387,7 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
             "_inputs",
             "_guesses",
             "_outputs",
+            "_derivative_options",
         )
         return {name: getattr(self, name) for name in names}
 
@@ -386,7 +400,7 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
             [q.copy() for q in self._history],
             None if self._previous is None else self._previous.copy(),
             self._active.copy(),
-            deepcopy(self._warm),
+            self._copy_warm(self._warm),
         )
 
     def restore_state(self, state):
@@ -394,7 +408,30 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
         self._history = deque((q.copy() for q in history), maxlen=4)
         self._previous = None if previous is None else previous.copy()
         self._active = active.copy()
-        self._warm = deepcopy(warm)
+        self._warm = self._copy_warm(warm)
+
+    @staticmethod
+    def _copy_warm(warm):
+        """Copy the known array layout without recursive generic dispatch."""
+        if warm is None:
+            return None
+        return {
+            key: tuple(a.copy() for a in value)
+            if key in ("hard", "soft")
+            else value.copy()
+            if isinstance(value, np.ndarray)
+            else value
+            for key, value in warm.items()
+        }
+
+    def solve_in_transaction(self, problem):
+        """Let the backend's proposal snapshot own rollback for this call."""
+        previous = self._backend_owns_rollback
+        self._backend_owns_rollback = True
+        try:
+            return self.solve(problem)
+        finally:
+            self._backend_owns_rollback = previous
 
     def _constraint_parameters(self, constraint, rows):
         if len(constraint.b) > rows:
@@ -503,7 +540,7 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
 
     def solve(self, problem):
         self._validate_problem(problem)
-        state = self.capture_state()
+        state = None if self._backend_owns_rollback else self.capture_state()
         self.last_stats = {"success": False}
         lower, upper = self.lower.copy(), self.upper.copy()
         self._problem = problem
@@ -520,7 +557,8 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
                 self.reset()
             return super().solve(problem.measured, problem.previous, problem.targets, active)
         except Exception:
-            self.restore_state(state)
+            if state is not None:
+                self.restore_state(state)
             raise
         finally:
             self.lower, self.upper = lower, upper

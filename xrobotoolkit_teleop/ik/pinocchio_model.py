@@ -83,8 +83,9 @@ class PinocchioModel:
         self.model.velocity_limit[self.get_joint_v_offset(name)] = value
 
     def update_kinematics(self):
-        pin.computeJointJacobians(self._native, self._data, self.state.q[7:])
+        pin.forwardKinematics(self._native, self._data, self.state.q[7:])
         pin.updateFramePlacements(self._native, self._data)
+        self._jacobian_configuration = None
 
     def get_T_world_frame(self, name):
         index = self._native.getFrameId(name, pin.FrameType.BODY)
@@ -97,6 +98,10 @@ class PinocchioModel:
     def joint_jacobian(self, name, frame):
         if frame != "world":
             raise ValueError("Collision Jacobians must be expressed in world coordinates")
+        q = self.state.q[7:]
+        if self._jacobian_configuration is None or not np.array_equal(q, self._jacobian_configuration):
+            pin.computeJointJacobians(self._native, self._data, q)
+            self._jacobian_configuration = q.copy()
         J = pin.getJointJacobian(self._native, self._data, self._indices[name], pin.ReferenceFrame.WORLD)
         return np.c_[np.zeros((6, 6)), J]
 

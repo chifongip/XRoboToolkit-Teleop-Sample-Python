@@ -81,7 +81,7 @@ class LeRobotOptimizationTests(unittest.TestCase):
         backend.propose(problem)
         self.assertIs(solver._optimizer, no_soft_function)
         self.assertEqual(solver._soft_rows, 0)
-        self.assertEqual(len(solver._variants), 2)
+        self.assertEqual(len(solver._variants), 3)  # Empty, hard-only, hard+soft.
         # Snapshot layout must remain compatible after switching variants.
         backend.propose(replace(problem, soft=soft))
 
@@ -115,7 +115,7 @@ class LeRobotOptimizationTests(unittest.TestCase):
             fake = Mock(return_value=result)
             fake.stats.return_value = {"success": success}
             # Cache owns the callable selected before every solve.
-            cached = solver._variants[False]
+            cached = solver._variants[(True, False)]
             with patch.dict(cached, _optimizer=fake), self.assertRaises(RuntimeError):
                 backend.propose(problem)
             self.assertEqual(pickle.dumps(solver.capture_state()), before)
@@ -131,7 +131,7 @@ class LeRobotOptimizationTests(unittest.TestCase):
         lower[0] += 1e-5
         callable_ = solver._optimizer
         spy = Mock(wraps=callable_)
-        cached = solver._variants[False]
+        cached = solver._variants[(True, False)]
         with patch.dict(cached, _optimizer=spy):
             backend.propose(replace(problem, hard=hard, lower=lower))
         dual = spy.call_args.args[-1]
@@ -163,7 +163,7 @@ class LeRobotOptimizationTests(unittest.TestCase):
         solver._warm["q"][0] = problem.upper[0] + 1
         callable_ = solver._optimizer
         spy = Mock(wraps=callable_)
-        with patch.dict(solver._variants[False], _optimizer=spy):
+        with patch.dict(solver._variants[(True, False)], _optimizer=spy):
             backend.propose(problem)
         expected = np.clip(
             solver._warm["q"], problem.lower[np.argsort(solver.indices)], problem.upper[np.argsort(solver.indices)]
@@ -185,7 +185,7 @@ class LeRobotOptimizationTests(unittest.TestCase):
             },
         )
         limited = solver.opti.to_function("limited_ik", solver._inputs + solver._guesses, solver._outputs)
-        with patch.dict(solver._variants[False], _optimizer=limited), self.assertRaises(RuntimeError):
+        with patch.dict(solver._variants[(True, False)], _optimizer=limited), self.assertRaises(RuntimeError):
             backend.propose(problem)
         self.assertEqual(pickle.dumps(solver.capture_state()), before)
         self.assertFalse(solver.last_stats["success"])
@@ -288,6 +288,45 @@ class LeRobotOptimizationTests(unittest.TestCase):
         spy = Mock(wraps=solver._optimizer)
         # The fourth row equals the previous padding, but its upper bound changes.
         expanded = LinearConstraint(np.zeros((4, n)), np.ones(4))
-        with patch.dict(solver._variants[True], _optimizer=spy):
+        with patch.dict(solver._variants[(True, True)], _optimizer=spy):
             backend.propose(replace(problem, soft=expanded))
         np.testing.assert_array_equal(spy.call_args.args[-1], old_dual)
+
+    def test_empty_graph_is_reused_after_collision_graph_growth(self):
+        backend, problem = self.fixture()
+        solver = backend.solver
+        empty = LinearConstraint(np.zeros((0, len(problem.previous))), np.empty(0))
+        unconstrained = replace(problem, hard=empty, soft=empty)
+        proposal = backend.propose(unconstrained)
+        backend.accept(proposal, proposal.positions)
+        graph = solver._graph
+        self.assertEqual(solver._layout, (0, 0))
+        self.assertEqual(solver.opti.ng, solver.model.nq)  # Joint bounds remain.
+        self.assertEqual(solver.opti.nx, solver.model.nq)
+        backend.propose(problem)
+        self.assertGreater(solver._rows, 0)
+        soft = LinearConstraint(np.zeros((1, len(problem.previous))), np.array([-0.001]))
+        proposal = backend.propose(replace(unconstrained, soft=soft))
+        backend.accept(proposal, proposal.positions)
+        self.assertEqual(solver._rows, 0)
+        self.assertGreaterEqual(solver._warm["slack"][0], 0.001 - 1e-6)
+        backend.propose(unconstrained)
+        self.assertIs(solver._graph, graph)
+        self.assertEqual(solver._layout, (0, 0))
+
+    def test_backend_owns_snapshot_but_direct_solve_still_rolls_back(self):
+        backend, problem = self.fixture()
+        solver = backend.solver
+        with patch.object(solver, "capture_state", wraps=solver.capture_state) as snapshot:
+            proposal = backend.propose(problem)
+        self.assertEqual(snapshot.call_count, 2)  # Accepted and pending state.
+        backend.accept(proposal, proposal.positions)
+        state = pickle.dumps(solver.capture_state())
+        with patch.object(solver, "_run_optimizer", side_effect=RuntimeError("failed")):
+            with self.assertRaises(RuntimeError):
+                backend.propose(problem)
+            self.assertFalse(solver._backend_owns_rollback)
+            self.assertEqual(pickle.dumps(solver.capture_state()), state)
+            with self.assertRaises(RuntimeError):
+                solver.solve(problem)
+        self.assertEqual(pickle.dumps(solver.capture_state()), state)

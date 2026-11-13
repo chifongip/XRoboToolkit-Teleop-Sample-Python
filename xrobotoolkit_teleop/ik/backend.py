@@ -66,8 +66,7 @@ class TransactionalBackend:
         try:
             for name, value in problem.measured.items():
                 self.robot.set_joint(name, value)
-            self.robot.update_kinematics()
-            positions = self.solver.solve(problem)
+            positions = self._solve_problem(problem)
             values = self._positions(positions)
             if np.any(values < problem.lower - 1e-6) or np.any(values > problem.upper + 1e-6):
                 raise RuntimeError("IK solver returned commands outside the requested bounds")
@@ -82,6 +81,11 @@ class TransactionalBackend:
             finally:
                 self.robot.state.q = configuration
                 self.robot.update_kinematics()
+
+    def _solve_problem(self, problem):
+        """Prepare the adapter for engines that read its numeric kinematics."""
+        self.robot.update_kinematics()
+        return self.solver.solve(problem)
 
     def accept(self, proposal: IKProposal, applied_positions: dict[str, float]) -> None:
         self._require_open()
