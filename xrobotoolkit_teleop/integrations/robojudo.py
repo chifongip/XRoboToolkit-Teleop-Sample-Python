@@ -4,7 +4,7 @@ import json
 import logging
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import ExitStack
 from numbers import Real
 
@@ -78,7 +78,9 @@ class RoboJuDoBridge:
         self._state_id = -1
         self._last_warning = float("-inf")
         self._feedback_timeout = 0.1
-        self._clear_pending()
+        self._outstanding = OrderedDict()
+        self._completion_records = OrderedDict()
+        self._latest = None
         self._multipart = False
         self.status = "waiting for robot feedback"
         self.hold_reason = "no fresh robot feedback received"
@@ -91,30 +93,81 @@ class RoboJuDoBridge:
         self._timing_ms = {}
         self._timing_samples = {}
         self._feedback_details = {}
-        self._proposal_count = self._ack_count = 0
+        self._proposal_count = self._completion_count = 0
 
     def _record_timing(self, name, value):
         self._timing_ms[name] = value
         self._timing_samples.setdefault(name, deque(maxlen=512)).append(value)
 
     def close(self):
-        self._resources.close()
+        try:
+            if hasattr(self, "_outstanding"):
+                self._clear_outstanding()
+        finally:
+            self._resources.close()
 
-    def _clear_pending(self):
-        self._pending_baseline = None
-        self._pending_positions = None
-        self._pending_at = None
-        self._pending_deadline = None
+    def _clear_outstanding(self):
+        records = list(self._outstanding.values())
+        self._outstanding.clear()
+        self._completion_records.clear()
+        for _, transaction, _, _, _ in records:
+            self.retargeter.discard_proposal(transaction)
+
+    def _observe_completion(self, state, now):
+        frame_id = state.get("applied_frame_id")
+        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
+            return
+        record = self._completion_records.pop(frame_id, None)
+        if record is None:
+            return
+        positions, sent_at, baseline = record
+        transaction_record = self._outstanding.pop(frame_id, None)
+        expected = (*baseline[:2], baseline[2] + 1)
+        current = (state["session_id"], state["generation"], state["command_id"])
+        matched = current == expected and positions == state["last_commanded_positions"]
+        if matched:
+            # Observe hardware completion even if its solver transaction expired.
+            self._record_timing("completion_latency", 1000 * (now - sent_at))
+            self._completion_count += 1
+        try:
+            if transaction_record is not None:
+                transaction = transaction_record[1]
+                if matched:
+                    self.retargeter.complete_proposal(transaction, positions)
+                else:
+                    self.retargeter.discard_proposal(transaction)
+        except (RuntimeError, ValueError, TypeError) as exc:
+            # Completion bookkeeping never gates the publishing schedule.
+            self._warn(exc)
+            self.retargeter.backend.reset()
+            self._clear_outstanding()
+        # Earlier proposals can no longer be selected after this completion.
+        for older in list(self._outstanding):
+            if older < frame_id:
+                self.retargeter.discard_proposal(self._outstanding.pop(older)[1])
+        for older in list(self._completion_records):
+            if older < frame_id:
+                self._completion_records.pop(older)
+
+    def _expire_outstanding(self, now):
+        for frame_id, record in list(self._outstanding.items()):
+            if now > record[3]:
+                self.retargeter.discard_proposal(self._outstanding.pop(frame_id)[1])
+        while len(self._outstanding) > 512:
+            self.retargeter.discard_proposal(self._outstanding.popitem(last=False)[1][1])
+        # Retain only lightweight completion metadata beyond the solver deadline.
+        while len(self._completion_records) > 512:
+            self._completion_records.popitem(last=False)
 
     def _rebase(self):
         try:
             self.retargeter.rebase()
         finally:
-            self._clear_pending()
+            self._clear_outstanding()
 
     def _warn(self, exc):
         if time.monotonic() - self._last_warning >= 1:
-            logger.warning("XR bridge holding: %s", exc)
+            logger.warning("XR bridge: %s", exc)
             self._last_warning = time.monotonic()
 
     def validate_feedback(self, state):
@@ -220,18 +273,27 @@ class RoboJuDoBridge:
             summary = f"age={samples[-1]:.1f} ms ({source}), p95={np.percentile(samples, 95):.1f} ms"
         else:
             summary = "waiting for measurements"
+        counts = self._feedback_details.get("command_counts", {})
+        counts = counts if isinstance(counts, dict) else {}
+        receiver_summary = ", ".join(
+            f"{name}={counts[name]}"
+            for name in ("received", "superseded", "rejected", "completed")
+            if type(counts.get(name)) is int and counts[name] >= 0
+        )
         logger.info(
-            "Feedback: %s; sent=%d, acked=%d",
+            "Feedback: %s; sent=%d, completed=%d; publish=%.1f Hz%s",
             summary,
             self._proposal_count,
-            self._ack_count,
+            self._completion_count,
+            self._proposal_count / elapsed,
+            f"; robot {receiver_summary}" if receiver_summary else "",
         )
         stages = []
         for label, name in (
             ("policy", "policy"),
             ("env_step", "env_step"),
             ("retarget", "retarget"),
-            ("ack_wait", "ack_wait"),
+            ("completion_latency", "completion_latency"),
         ):
             values = self._timing_samples.get(name)
             if values:
@@ -239,7 +301,7 @@ class RoboJuDoBridge:
         if stages:
             logger.info("Processing p95 (ms): %s", ", ".join(stages))
         self._timing_samples.clear()
-        self._proposal_count = self._ack_count = 0
+        self._proposal_count = self._completion_count = 0
         self._xr_updates = 0
         self._xr_report_at = now
 
@@ -277,22 +339,28 @@ class RoboJuDoBridge:
                 self.hold_reason = f"invalid robot feedback: {exc}"
                 self._warn(exc)
         else:
+            self._latest = None
             self._rebase()
             self.status = "feedback backlog"
             self.hold_reason = "feedback receive budget exhausted; waiting for fresh state"
             return False
-        if latest is None:
-            if invalid_feedback:
-                self._rebase()
-                return False
-            # The bridge only computes on newly received state. Reset clutches
-            # after feedback loss, without requiring packets or synchronized clocks.
-            if time.monotonic() - getattr(self, "_received_at", float("-inf")) > self._feedback_timeout:
-                self._rebase()
-                self.status = "waiting for robot feedback"
-                self.hold_reason = "robot feedback missing or timed out"
+        if latest is None and invalid_feedback:
+            self._latest = None
+            self._rebase()
             return False
         now = time.monotonic()
+        if latest is not None and (
+            (latest["session_id"], latest["generation"]) != self._key or latest["state_id"] > self._state_id
+        ):
+            self._latest = latest
+            self._received_at = now
+        else:
+            latest = self._latest
+        if latest is None or now - self._received_at > self._feedback_timeout:
+            self._rebase()
+            self.status = "waiting for robot feedback"
+            self.hold_reason = "robot feedback missing or timed out"
+            return False
         key = (latest["session_id"], latest["generation"])
         if key != self._key:
             same_robot = self._key is not None and key[0] == self._key[0]
@@ -304,12 +372,9 @@ class RoboJuDoBridge:
                 logger.info("Robot feedback generation changed: %s", latest.get("reset_reason", "session reset"))
             self._key = key
             self._state_id = -1
-            self._clear_pending()
+            self._clear_outstanding()
             self._timing_ms.clear()
-        if latest["state_id"] <= self._state_id:
-            return False
         self._state_id = latest["state_id"]
-        self._received_at = now
         self._feedback_timeout = latest["feedback_timeout_s"]
         self._robot_intent = latest["intent"]
         self._record_timing("feedback_age_at_publish", 1000 * max(latest["joint_age_s"].values()))
@@ -343,26 +408,8 @@ class RoboJuDoBridge:
                 if value >= 0:
                     self._record_timing(name, value)
         baseline = (*key, latest["command_id"])
-        if self._pending_baseline is not None:
-            if baseline == self._pending_baseline and now <= self._pending_deadline:
-                return False
-            expected = (*self._pending_baseline[:2], self._pending_baseline[2] + 1)
-            if baseline == expected and latest["last_commanded_positions"] == self._pending_positions:
-                try:
-                    if not self.retargeter.acknowledge(latest["last_commanded_positions"]):
-                        raise RuntimeError("retargeter has no matching pending proposal")
-                except (RuntimeError, ValueError, TypeError) as exc:
-                    self._rebase()
-                    self.status = "hold"
-                    self.hold_reason = f"IK acknowledgement failed: {exc}"
-                    self._warn(exc)
-                    return False
-                self._record_timing("ack_wait", 1000 * (now - self._pending_at))
-                self._ack_count += 1
-            else:
-                self._rebase()
-                self._warn(ValueError("arm proposal was not acknowledged; rebasing on fresh feedback"))
-        self._clear_pending()
+        self._expire_outstanding(now)
+        self._observe_completion(latest, now)
         try:
             retarget_started = time.monotonic()
             frame = self._xr_frame() if latest["intent"] == "TRACK" else None
@@ -377,13 +424,14 @@ class RoboJuDoBridge:
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
                 hand_velocity_limit=latest.get("hand_velocity_limit"),
+                streaming=True,
             )
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
             self._record_timing("retarget", 1000 * (time.monotonic() - retarget_started))
             # Remote clocks are never compared. This excludes transit/queueing;
             # the robot performs the authoritative full-age check at application.
-            age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - now
+            age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - self._received_at
             self._record_timing("measurement_age_lower_bound", 1000 * age_lower_bound)
             if age_lower_bound > latest["feedback_timeout_s"]:
                 self._rebase()
@@ -416,11 +464,17 @@ class RoboJuDoBridge:
             )
             if proposal is None:
                 return False
-            self._pending_positions = proposal.copy()
-            self._pending_baseline = baseline
-            self._pending_at = time.monotonic()
+            sent_at = time.monotonic()
+            self._completion_records[self._frame_id] = (proposal.copy(), sent_at, baseline)
+            self._outstanding[self._frame_id] = (
+                proposal.copy(),
+                self.retargeter.detach_proposal(),
+                sent_at,
+                self._received_at + latest["feedback_timeout_s"],
+                baseline,
+            )
+            self._expire_outstanding(time.monotonic())
             self._proposal_count += 1
-            self._pending_deadline = self._pending_at + latest["feedback_timeout_s"]
             return True
         except (RuntimeError, TypeError, ValueError, OverflowError, zmq.ZMQError) as exc:
             self._rebase()
@@ -476,12 +530,11 @@ def main(
     )
     try:
         status = None
+        period = 1 / control_frequency
+        deadline = time.monotonic()
         while True:
-            # Wake on feedback instead of maintaining an unrelated phase that
-            # can put each proposal just after the robot's next receive tick.
-            bridge.feedback.poll(timeout=max(1, min(100, int(1000 / control_frequency))))
-            started = time.monotonic()
-            sent = bridge.poll()
+            time.sleep(max(0, deadline - time.monotonic()))
+            bridge.poll()
             if xr_diagnostics:
                 bridge.report_xr_diagnostics()
             current = (bridge.status, bridge.hold_reason)
@@ -489,8 +542,10 @@ def main(
                 detail = f" ({bridge.hold_reason})" if bridge.hold_reason else ""
                 logger.info("Robot bridge: %s%s", bridge.status, detail)
                 status = current
-            if sent:
-                time.sleep(max(0, 1 / control_frequency - (time.monotonic() - started)))
+            deadline += period
+            now = time.monotonic()
+            if deadline < now:
+                deadline += (int((now - deadline) / period) + 1) * period
     except KeyboardInterrupt:
         pass
     finally:

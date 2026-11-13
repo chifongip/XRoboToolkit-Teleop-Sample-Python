@@ -407,13 +407,13 @@ class BridgeTests(unittest.TestCase):
 
     def test_idle_diagnostics_do_not_report_stale_acknowledgements(self):
         self.bridge._record_timing("retarget", 1.0)
-        self.bridge._timing_ms["ack_wait"] = 20.0
+        self.bridge._timing_ms["completion_latency"] = 20.0
         self.bridge._feedback_details = {"oldest_joint": "left_elbow_joint"}
         with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
-        self.assertNotIn("ack_wait", logs.output[1])
-        self.assertIn("sent=0, acked=0", logs.output[1])
+        self.assertNotIn("completion_latency", logs.output[1])
+        self.assertIn("sent=0, completed=0", logs.output[1])
         self.assertIn("Processing p95 (ms): retarget=1.0", logs.output[2])
         self.assertEqual(self.bridge._timing_samples, {})
 
@@ -431,7 +431,7 @@ class BridgeTests(unittest.TestCase):
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
         self.assertEqual(len(logs.output), 3)
-        self.assertIn("Feedback: age=21.3 ms (right hand), p95=21.3 ms; sent=0, acked=0", logs.output[1])
+        self.assertIn("Feedback: age=21.3 ms (right hand), p95=21.3 ms; sent=0, completed=0", logs.output[1])
         self.assertIn("Processing p95 (ms): policy=2.7, env_step=1.8, retarget=1.3", logs.output[2])
         self.assertNotIn("{", " ".join(logs.output))
         self.assertNotIn("snapshot_sequence", " ".join(logs.output))
@@ -493,9 +493,9 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(frame["type"], "upper_body_visualization")
         self.assertIsNone(frame["positions"])
         self.assertIn("left", frame["target_poses"])
-        self.assertIsNone(self.bridge._pending_baseline)
+        self.assertFalse(self.bridge._outstanding)
 
-    def test_invalid_stale_and_duplicate_feedback_cannot_produce_commands(self):
+    def test_invalid_feedback_stops_commands_but_duplicates_do_not_refresh_age(self):
         for mutate in ("age", "partial", "nan", "duplicate_json"):
             bad = copy.deepcopy(self.state)
             if mutate == "age":
@@ -510,8 +510,13 @@ class BridgeTests(unittest.TestCase):
             self.assertFalse(self.bridge.poll(), mutate)
         self.bridge.feedback.messages.append(self.state)
         self.assertTrue(self.bridge.poll())
+        received_at = self.bridge._received_at
         self.bridge.feedback.messages.append(self.state)
-        self.assertFalse(self.bridge.poll())
+        self.assertTrue(self.bridge.poll())
+        self.assertEqual(self.bridge._received_at, received_at)
+        with patch("time.monotonic", return_value=received_at + 0.11):
+            self.bridge.feedback.messages.append(self.state)
+            self.assertFalse(self.bridge.poll())
 
     def test_feedback_outage_resets_clutches(self):
         self.bridge.feedback.messages.append(self.state)
@@ -520,6 +525,7 @@ class BridgeTests(unittest.TestCase):
             self.assertFalse(self.bridge.poll())
         self.assertTrue(self.bridge.retargeter._need_release)
         self.assertEqual(self.bridge.hold_reason, "robot feedback missing or timed out")
+        self.assertFalse(self.bridge._completion_records)
 
     def test_invalid_feedback_retains_rejection_reason(self):
         bad = copy.deepcopy(self.state)
@@ -586,38 +592,50 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn("timestamp=", logs.output[0])
 
     def test_acknowledgement_timing_is_shown_when_commands_complete(self):
-        self.bridge._record_timing("ack_wait", 25.0)
-        self.bridge._proposal_count = self.bridge._ack_count = 1
+        self.bridge._record_timing("completion_latency", 25.0)
+        self.bridge._proposal_count = self.bridge._completion_count = 1
         with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
-        self.assertIn("sent=1, acked=1", logs.output[1])
-        self.assertIn("Processing p95 (ms): ack_wait=25.0", logs.output[2])
+        self.assertIn("sent=1, completed=1", logs.output[1])
+        self.assertIn("Processing p95 (ms): completion_latency=25.0", logs.output[2])
 
-    def test_waits_for_acknowledgement_instead_of_resending_old_baseline(self):
+    def test_publishes_without_completion_using_new_and_cached_feedback(self):
         self.bridge.feedback.messages.append(self.state)
         self.assertTrue(self.bridge.poll())
         pending = copy.deepcopy(self.state)
         pending["state_id"] += 1
         self.bridge.feedback.messages.append(pending)
-        self.assertFalse(self.bridge.poll())
+        self.assertTrue(self.bridge.poll())
+        self.assertTrue(self.bridge.poll())  # No new feedback packet is needed.
         acknowledged = copy.deepcopy(pending)
         acknowledged["state_id"] += 1
         acknowledged["command_id"] += 1
         self.bridge.feedback.messages.append(acknowledged)
         self.assertTrue(self.bridge.poll())
-        self.assertEqual(len(self.bridge.commands.frames), 2)
+        self.assertEqual(len(self.bridge.commands.frames), 4)
+        self.assertEqual([f["command_id"] for f in self.bridge.commands.frames], [0, 0, 0, 1])
 
-    def test_matching_acknowledgement_can_arrive_after_local_wait_deadline(self):
+    def test_late_completion_is_counted_without_committing_expired_solver_history(self):
         with patch("time.monotonic", return_value=100.0) as clock:
             self.bridge.feedback.messages.append(copy.deepcopy(self.state))
             self.assertTrue(self.bridge.poll())
             clock.return_value = 100.11
             self.state["state_id"] += 1
             self.state["command_id"] += 1
+            self.state["applied_bridge_id"] = self.bridge.bridge_id
+            self.state["applied_frame_id"] = 1
             self.bridge.feedback.messages.append(self.state)
+            with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+                self.assertTrue(self.bridge.poll())
+                commit.assert_not_called()
+            self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 110.0)
+            self.assertEqual(self.bridge._completion_count, 1)
+            self.assertNotIn(1, self.bridge._outstanding)
+            self.assertNotIn(1, self.bridge._completion_records)
+            # Cached feedback cannot count the same hardware completion twice.
             self.assertTrue(self.bridge.poll())
-            self.assertAlmostEqual(self.bridge._timing_ms["ack_wait"], 110.0)
+            self.assertEqual(self.bridge._completion_count, 1)
 
     def test_roundtrip_diagnostics_include_pipeline_compute_and_ack_delays(self):
         self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
@@ -629,11 +647,14 @@ class BridgeTests(unittest.TestCase):
             self.assertIn("retarget", self.bridge._timing_ms)
             self.assertIn("measurement_age_lower_bound", self.bridge._timing_ms)
             clock.return_value = 100.06
+            self.state["applied_bridge_id"] = self.bridge.bridge_id
+            self.state["applied_frame_id"] = 1
+            self.state["last_commanded_positions"] = self.bridge.commands.frames[-1]["positions"]
             self.state["state_id"] += 1
             self.state["command_id"] += 1
             self.bridge.feedback.messages.append(self.state)
             self.assertTrue(self.bridge.poll())
-            self.assertAlmostEqual(self.bridge._timing_ms["ack_wait"], 60.0)
+            self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 60.0)
 
     def test_optional_timing_metadata_cannot_break_control_or_retain_old_mode_values(self):
         self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
@@ -651,7 +672,7 @@ class BridgeTests(unittest.TestCase):
         self.state["intent"] = "HOLD"
         self.bridge.feedback.messages.append(self.state)
         self.assertFalse(self.bridge.poll())
-        self.assertNotIn("ack_wait", self.bridge._timing_ms)
+        self.assertNotIn("completion_latency", self.bridge._timing_ms)
 
     def test_lost_home_proposal_retries_after_deadline(self):
         with patch("time.monotonic", return_value=100.0) as clock:
@@ -682,6 +703,7 @@ class BridgeTests(unittest.TestCase):
                     sent = self.bridge.poll()
                 if index >= 2:
                     self.assertTrue(sent)
+                if index in (2, 4):
                     np.testing.assert_allclose(
                         list(self.bridge.commands.frames[-1]["positions"].values()),
                         list(self.home.values()),
@@ -696,6 +718,44 @@ class BridgeTests(unittest.TestCase):
             with patch.object(self.bridge, "_xr_frame", return_value=frame):
                 self.assertFalse(self.bridge.poll())
             self.assertTrue(self.bridge.retargeter._need_release)
+
+    def test_outstanding_transactions_are_bounded_without_completions(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(self.state)
+            for _ in range(520):
+                self.assertTrue(self.bridge.poll())
+        self.assertEqual(len(self.bridge._outstanding), 512)
+        self.assertEqual(len(self.bridge._completion_records), 512)
+        self.assertEqual(len(self.bridge.commands.frames), 520)
+        self.bridge._expire_outstanding(101.0)
+        self.assertFalse(self.bridge._outstanding)
+        self.assertEqual(len(self.bridge._completion_records), 512)
+
+    def test_completion_commits_only_its_frame_while_publication_continues(self):
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            self.assertTrue(self.bridge.poll())
+            self.assertTrue(self.bridge.poll())
+            clock.return_value = 100.04
+            self.state.update(
+                state_id=2,
+                command_id=1,
+                applied_bridge_id=self.bridge.bridge_id,
+                applied_frame_id=2,
+                last_commanded_positions=self.bridge.commands.frames[1]["positions"],
+            )
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            with patch.object(
+                self.bridge.retargeter, "complete_proposal", wraps=self.bridge.retargeter.complete_proposal
+            ) as commit:
+                self.assertTrue(self.bridge.poll())
+                commit.assert_called_once()
+                self.assertTrue(self.bridge.poll())
+                commit.assert_called_once()
+            self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 40.0)
+            self.assertNotIn(1, self.bridge._outstanding)
+            self.assertNotIn(2, self.bridge._outstanding)
 
     def test_computation_overrun_resets_clutches_and_drops_proposal(self):
         with patch("time.monotonic", return_value=100.0) as clock:

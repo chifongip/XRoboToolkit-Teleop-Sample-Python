@@ -28,7 +28,7 @@ class CollisionToggleTests(unittest.TestCase):
             (["--collision-checking"], True),
         ):
             bridge = Mock()
-            bridge.feedback.poll.side_effect = KeyboardInterrupt
+            bridge.poll.side_effect = KeyboardInterrupt
             with (
                 self.subTest(args=args),
                 patch("xrobotoolkit_teleop.integrations.robojudo.RoboJuDoBridge", return_value=bridge) as factory,
@@ -43,6 +43,38 @@ class CollisionToggleTests(unittest.TestCase):
         for args in (["--no-collision-checking"], ["--collision-checking", "True"], ["--collision-checking", "False"]):
             with self.subTest(args=args), self.assertRaises(SystemExit):
                 tyro.cli(main, args=args, console_outputs=False)
+
+    def test_bridge_schedule_ignores_completion_and_skips_missed_ticks(self):
+        self._check_bridge_schedule(0.003, [0, 0.02, 0.04, 0.06])
+        self._check_bridge_schedule(0.055, [0, 0.06, 0.12, 0.18])
+
+    def _check_bridge_schedule(self, work_time, expected):
+        now = 0.0
+        samples = []
+        bridge = Mock(status="tracking", hold_reason=None)
+
+        def sleep(duration):
+            nonlocal now
+            now += duration
+
+        def poll():
+            nonlocal now
+            if len(samples) == 4:
+                raise KeyboardInterrupt
+            samples.append(now)
+            now += work_time
+            return True
+
+        bridge.poll.side_effect = poll
+        with (
+            patch("xrobotoolkit_teleop.integrations.robojudo.RoboJuDoBridge", return_value=bridge),
+            patch("time.monotonic", side_effect=lambda: now),
+            patch("time.sleep", side_effect=sleep),
+        ):
+            main()
+        np.testing.assert_allclose(samples, expected, rtol=0, atol=1e-9)
+        bridge.feedback.poll.assert_not_called()
+        bridge.close.assert_called_once()
 
     def test_disabled_arm_tracking_and_homing(self):
         self._check_disabled_motion("x2")

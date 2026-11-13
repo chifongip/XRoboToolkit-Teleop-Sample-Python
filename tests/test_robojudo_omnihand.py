@@ -1,13 +1,67 @@
 """Combined arm/finger retargeting against the articulated collision model."""
 
+import copy
 import os
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
 import numpy as np
-from test_robojudo_x2 import fixture
+from test_robojudo_x2 import MemoryContext, fixture
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
+from xrobotoolkit_teleop.integrations.robojudo import RoboJuDoBridge
+
+
+class OmniHandStreamingBridgeTests(unittest.TestCase):
+    def test_delayed_or_missing_completions_do_not_pause_xr_or_publishing(self):
+        bridge = RoboJuDoBridge(
+            robot="x2_omnihand", ik_backend=os.environ.get("BRIDGE_TEST_BACKEND", "placo"), context=MemoryContext()
+        )
+        self.addCleanup(bridge.close)
+        measured, home = fixture(bridge.retargeter)
+        home.update(dict.fromkeys(bridge.retargeter.hand_names, 0.0))
+        state = dict(
+            schema_version=2,
+            type="upper_body_state",
+            session_id="robot",
+            generation=1,
+            state_id=0,
+            command_id=0,
+            intent="TRACK",
+            valid=True,
+            positions=measured,
+            joint_age_s=dict.fromkeys(measured, 0.0),
+            last_commanded_positions=home,
+            default_positions=home,
+            position_limits={
+                n: list(bounds)
+                for n, bounds in (bridge.retargeter.limits | bridge.retargeter.profile.hands.limits).items()
+            },
+            control_dt=0.02,
+            arm_velocity_limit=8.0,
+            return_velocity_limit=1.0,
+            hand_velocity_limit=2.0,
+            feedback_timeout_s=0.3,
+        )
+        poses = {name: [0, 0, 0, 0, 0, 0, 1] for name in ("headset", "left_controller", "right_controller")}
+        with patch("time.monotonic", return_value=100.0) as clock:
+            for index in range(15):
+                clock.return_value = 100.0 + index * 0.02
+                frame = XRFrame(index + 1, poses, {"left": 0.0, "right": 0.0}, triggers={"left": 1.0, "right": 0.0})
+                # Feedback remains fresh but never acknowledges any command.
+                if index % 3 == 0:
+                    state["state_id"] += 1
+                    bridge.feedback.messages.append(copy.deepcopy(state))
+                with patch.object(bridge, "_xr_frame", return_value=frame) as sample:
+                    sent = bridge.poll()
+                sample.assert_called_once()
+                if index >= 1:
+                    self.assertTrue(sent)
+                    command = bridge.commands.frames[-1]
+                    self.assertEqual(command["command_id"], 0)
+                    self.assertGreater(command["positions"]["L_index_mcp_joint"], 0)
+        self.assertEqual(len(bridge.commands.frames), 14)
+        self.assertEqual(len(bridge._outstanding), 14)
 
 
 class OmniHandRetargeterTests(unittest.TestCase):

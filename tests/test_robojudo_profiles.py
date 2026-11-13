@@ -106,6 +106,8 @@ class ProfileBridgeTests(unittest.TestCase):
     def poll(self, ack=False):
         if ack:
             self.state["command_id"] += 1
+            self.state["applied_bridge_id"] = self.bridge.bridge_id
+            self.state["applied_frame_id"] = self.bridge.commands.frames[-1]["frame_id"]
             self.state["last_commanded_positions"] = self.bridge.commands.frames[-1]["positions"].copy()
         self.state["state_id"] += 1
         self.frame.timestamp_ns += 1
@@ -115,11 +117,11 @@ class ProfileBridgeTests(unittest.TestCase):
 
     def engage_and_propose(self):
         self.assertFalse(self.poll())
-        self.assertFalse(self.poll())
+        self.assertTrue(self.poll())  # released idle command in streaming mode
         self.frame.grips["reach"] = 1.0
         self.assertTrue(self.poll())  # clutch anchor has no solver history
         self.assertTrue(self.poll(ack=True))
-        self.assertIsNotNone(self.bridge.retargeter._pending)
+        self.assertIsNotNone(next(reversed(self.bridge._outstanding.values()))[1][0])
         self.assertEqual(self.solver.history, 0)
 
     def test_different_joint_count_mapping_and_pending_history(self):
@@ -129,14 +131,14 @@ class ProfileBridgeTests(unittest.TestCase):
         self.assertTrue(self.poll(ack=True))
         self.assertEqual(self.solver.history, 1)
         self.assertEqual(self.solver.applied, self.state["last_commanded_positions"])
-        self.assertFalse(self.poll())  # unchanged command baseline waits
+        self.assertTrue(self.poll())  # unchanged baseline never blocks publishing
         self.assertEqual(self.solver.history, 1)
 
-    def test_accept_failure_holds_and_discards_pending(self):
+    def test_accept_failure_resets_history_without_stopping_publication(self):
         self.engage_and_propose()
         with patch.object(self.bridge.retargeter.backend, "accept", side_effect=RuntimeError("accept failed")):
-            self.assertFalse(self.poll(ack=True))
-        self.assertIn("acknowledgement failed", self.bridge.hold_reason)
+            self.assertTrue(self.poll(ack=True))
+        self.assertEqual(self.bridge.status, "tracking")
         self.assertIsNone(self.bridge.retargeter._pending)
         self.assertEqual(self.solver.history, 0)
 
@@ -160,19 +162,19 @@ class ProfileBridgeTests(unittest.TestCase):
         self.assertTrue(self.poll(ack=True))
         self.assertEqual(self.solver.applied, positions)
 
-    def test_robot_acknowledgement_is_authoritative_after_local_wait_deadline(self):
+    def test_expired_completion_history_is_discarded_without_stopping(self):
         self.engage_and_propose()
         self.state["feedback_timeout_s"] = 1.0
-        with patch("time.monotonic", return_value=self.bridge._pending_at + 0.11):
+        with patch("time.monotonic", return_value=next(reversed(self.bridge._outstanding.values()))[2] + 0.11):
             self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.solver.history, 1)
-        self.assertIsNotNone(self.solver.applied)
+        self.assertEqual(self.solver.history, 0)
+        self.assertIsNone(self.solver.applied)
 
-    def test_retargeter_rejecting_acknowledgement_holds(self):
+    def test_retargeter_rejecting_completion_does_not_stop_publishing(self):
         self.engage_and_propose()
-        with patch.object(self.bridge.retargeter, "acknowledge", return_value=False):
-            self.assertFalse(self.poll(ack=True))
-        self.assertEqual(self.bridge.status, "hold")
+        with patch.object(self.bridge.retargeter, "complete_proposal", return_value=False):
+            self.assertTrue(self.poll(ack=True))
+        self.assertEqual(self.bridge.status, "tracking")
         self.assertIsNone(self.bridge.retargeter._pending)
 
     def test_cleanup_runs_even_if_pending_rejection_fails(self):
@@ -181,7 +183,7 @@ class ProfileBridgeTests(unittest.TestCase):
         path = Path(retargeter.profile.spec.urdf_path)
         with patch.object(retargeter.backend, "reject", side_effect=RuntimeError("reject failed")):
             with self.assertRaisesRegex(RuntimeError, "reject failed"):
-                retargeter.close()
+                self.bridge.close()
         self.assertFalse(path.exists())
         self.assertIsNone(retargeter._pending)
         retargeter.close()
@@ -219,7 +221,7 @@ class ProfileBridgeTests(unittest.TestCase):
 
     def test_deadline_expiry_rejects_pending_and_reanchors(self):
         self.engage_and_propose()
-        with patch("time.monotonic", return_value=self.bridge._pending_at + 0.11):
+        with patch("time.monotonic", return_value=next(reversed(self.bridge._outstanding.values()))[2] + 0.11):
             self.assertTrue(self.poll())
         self.assertEqual(self.solver.history, 0)
         self.assertIsNone(self.solver.applied)

@@ -139,6 +139,28 @@ class ExternalStateRetargeter(CollisionPolicy):
         self._pending_positions = None
         return True
 
+    def detach_proposal(self):
+        """Transfer an uncommitted solver transaction to a streaming publisher."""
+        transaction = (self._pending, self._pending_positions)
+        self._pending = None
+        self._pending_positions = None
+        return transaction
+
+    def complete_proposal(self, transaction, positions):
+        """Commit only the transaction explicitly reported as applied by the robot."""
+        proposal, expected = transaction
+        if expected != positions:
+            self.discard_proposal(transaction)
+            return False
+        if proposal is not None:
+            self.backend.accept(proposal, {n: positions[n] for n in self.arm_names})
+        return True
+
+    def discard_proposal(self, transaction):
+        proposal, _ = transaction
+        if proposal is not None and not self._closed:
+            self.backend.reject(proposal)
+
     def _output(self, candidate):
         self._checked_configuration = candidate.copy()
         positions = self._positions(candidate)
@@ -187,6 +209,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         return fresh
 
     def _tracking_targets(self, frame):
+        self._idle_tracking = False
         if frame is None:
             self.hold_reason = "XR frame unavailable"
             self.rebase()
@@ -203,12 +226,14 @@ class ExternalStateRetargeter(CollisionPolicy):
             self.hold_reason = "release all grips before engaging"
             if all(value <= self.settings.grip_threshold for value in grips):
                 self._need_release = False
+                self._idle_tracking = True
                 self.hold_reason = "grips released; waiting for engagement"
             return False
         self.active = {
             key: value > self.settings.grip_threshold for key, value in zip(self.arm_joints, grips, strict=True)
         }
         if not any(self.active.values()):
+            self._idle_tracking = True
             self.hold_reason = "no grip exceeds the activation threshold"
             self._heading = None
             self._references.clear()
@@ -325,12 +350,15 @@ class ExternalStateRetargeter(CollisionPolicy):
         position_limits,
         *,
         hand_velocity_limit=None,
+        streaming=False,
         **kwargs,
     ):
         if self._closed:
             raise RuntimeError("Retargeter is closed")
         if not self.hand_names:
-            return self._step_arms(measured_positions, previous_targets, default_positions, position_limits, **kwargs)
+            return self._step_arms(
+                measured_positions, previous_targets, default_positions, position_limits, streaming=streaming, **kwargs
+            )
         self.reject()
         if any(
             set(payload) != set(self.command_names)
@@ -356,12 +384,19 @@ class ExternalStateRetargeter(CollisionPolicy):
             subset(default_positions),
             subset(position_limits),
             held_finger_targets={n: previous_targets[n] for n in self.hand_names},
+            streaming=streaming,
             **kwargs,
         )
         arms_checked = proposal is not None
         if not arms_checked:
             frame = kwargs.get("frame")
-            if kwargs.get("intent") != "TRACK" or frame is None or frame.return_to_default or not self._fresh(frame):
+            if (
+                kwargs.get("intent") != "TRACK"
+                or frame is None
+                or frame.return_to_default
+                or self._need_release
+                or not self._fresh(frame)
+            ):
                 return None
             # Grips clutch arms only. Fresh triggers can move fingers even when
             # no arm is engaged or the arm solver cannot produce a safe step.
@@ -425,7 +460,7 @@ class ExternalStateRetargeter(CollisionPolicy):
 
             self._project_hands(candidate)
             self._project_hands(held)
-            if not arms_checked and np.array_equal(candidate, previous):
+            if not streaming and not arms_checked and np.array_equal(candidate, previous):
                 self.status = "hold"
                 return None
             # Reuse this step's checked arm path only when fingers stayed held.
@@ -488,6 +523,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         arm_velocity_limit=None,
         return_velocity_limit=None,
         held_finger_targets=None,
+        streaming=False,
     ):
         """Return checked float32 positions, or None to retain targets.
 
@@ -535,6 +571,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         robot.update_kinematics()
         bounds = {}
         homing = intent == "HOME"
+        idle = False
         try:
             if intent == "HOLD":
                 self.hold_reason = "RoboJuDo requested HOLD (mode, ownership, or safety gate)"
@@ -549,7 +586,11 @@ class ExternalStateRetargeter(CollisionPolicy):
                         return None
                     homing = True
                 elif not self._tracking_targets(frame):
-                    return None
+                    # Apply the same limits, quantization, and path checks to idle frames.
+                    if not (streaming and self._idle_tracking):
+                        return None
+                    idle = True
+                    self.active = dict.fromkeys(self.arm_joints, False)
             if homing:
                 self.reset()
                 self.active = {name: True for name in self.arm_joints}
@@ -583,12 +624,13 @@ class ExternalStateRetargeter(CollisionPolicy):
             if any(self.backend.spec.initial_positions[n] != default_positions[n] for n in self.arm_names):
                 self.backend.reset()
                 self.backend.spec.initial_positions.update(default_positions)
-            if self._captured_reference and not homing:
+            if idle or (self._captured_reference and not homing):
                 # The engagement/recovery frame only anchors the clutch. Do not
                 # let posture regularization change a held target on this frame.
                 candidate = self._quantize(previous.copy(), bounds, previous_targets)
                 self._validate_motion(measured, previous, candidate)
                 self.status = "tracking"
+                self.hold_reason = None
                 return self._output(candidate)
             if homing:
                 for name, value in default_positions.items():
