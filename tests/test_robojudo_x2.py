@@ -376,6 +376,47 @@ class MemoryContext:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_invalid_feedback_still_exposes_current_source_diagnostics(self):
+        self.state["valid"] = False
+        self.state["feedback_diagnostics"] = {"oldest_joint": "left_elbow_joint", "source_age_ms": {"body": 150.0}}
+        self.bridge.feedback.messages.append(self.state)
+        self.assertFalse(self.bridge.poll())
+        self.assertFalse(self.bridge._feedback_details["valid"])
+        self.assertEqual(self.bridge._feedback_details["source_age_ms"]["body"], 150.0)
+        self.assertEqual(len(self.bridge.commands.frames), 0)
+
+    def test_optional_feedback_diagnostics_do_not_change_command_validation(self):
+        self.state["feedback_diagnostics"] = {
+            "oldest_joint": "left_elbow_joint",
+            "source_age_ms": {"body": 12.0, "left_hand": "bad"},
+            "handoff_delay_ms": 0.2,
+            "previous_publication": {"state_id": 1, "build_ms": 0.1, "encode_send_ms": 0.3},
+        }
+        self.bridge.feedback.messages.append(self.state)
+        self.assertTrue(self.bridge.poll())
+        self.assertEqual(self.bridge._timing_ms["body_measurement_age"], 12.0)
+        self.assertEqual(self.bridge._timing_ms["hand_handoff_delay"], 0.2)
+        self.assertEqual(self.bridge._timing_ms["previous_feedback_encode_send"], 0.3)
+        self.assertNotIn("left_hand_measurement_age", self.bridge._timing_ms)
+        self.state["state_id"] += 1
+        self.state.pop("feedback_diagnostics")
+        self.bridge.feedback.messages.append(self.state)
+        self.bridge.poll()
+        for name in ("body_measurement_age", "hand_handoff_delay", "previous_feedback_encode_send"):
+            self.assertNotIn(name, self.bridge._timing_ms)
+
+    def test_idle_diagnostics_do_not_report_stale_acknowledgements(self):
+        self.bridge._record_timing("retarget", 1.0)
+        self.bridge._timing_ms["ack_wait"] = 20.0
+        self.bridge._feedback_details = {"oldest_joint": "left_elbow_joint"}
+        with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+        self.assertNotIn("ack_wait", logs.output[1])
+        self.assertIn("acknowledgements=0", logs.output[2])
+        self.assertIn("'p95': 1.0", logs.output[2])
+        self.assertEqual(self.bridge._timing_samples, {})
+
     def setUp(self):
         with patch("zmq.Context.instance", return_value=MemoryContext()):
             self.bridge = RoboJuDoX2Bridge()

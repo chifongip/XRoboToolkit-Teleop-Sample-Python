@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from contextlib import ExitStack
 from numbers import Real
 
@@ -88,6 +89,13 @@ class RoboJuDoBridge:
         self._xr_triggers = {}
         self._xr_report_at = time.monotonic()
         self._timing_ms = {}
+        self._timing_samples = {}
+        self._feedback_details = {}
+        self._proposal_count = self._ack_count = 0
+
+    def _record_timing(self, name, value):
+        self._timing_ms[name] = value
+        self._timing_samples.setdefault(name, deque(maxlen=512)).append(value)
 
     def close(self):
         self._resources.close()
@@ -192,7 +200,27 @@ class RoboJuDoBridge:
             self._xr_triggers,
             getattr(self, "_robot_intent", "no feedback"),
         )
-        logger.info("Arm round-trip timing (ms): %s", {key: round(value, 1) for key, value in self._timing_ms.items()})
+        latest = {
+            key: round(value, 1) for key, value in self._timing_ms.items() if key != "ack_wait" or self._ack_count
+        }
+        logger.info("Feedback measurement ages and execution durations (ms): %s", latest)
+        distributions = {
+            name: {
+                "count": len(values),
+                **dict(zip(("p50", "p95", "max"), np.percentile(values, (50, 95, 100)).round(2).tolist(), strict=True)),
+            }
+            for name, values in self._timing_samples.items()
+            if values
+        }
+        logger.info(
+            "Feedback timing distributions (ms): %s; proposals=%d, acknowledgements=%d; sources=%s",
+            distributions,
+            self._proposal_count,
+            self._ack_count,
+            self._feedback_details,
+        )
+        self._timing_samples.clear()
+        self._proposal_count = self._ack_count = 0
         self._xr_updates = 0
         self._xr_report_at = now
 
@@ -214,6 +242,13 @@ class RoboJuDoBridge:
                 if len(payload) > 65_536:
                     raise ValueError("feedback exceeds size limit")
                 state = json.loads(payload, object_pairs_hook=_unique_object)
+                if isinstance(state, dict) and state.get("type") == "upper_body_state":
+                    details = state.get("feedback_diagnostics", {})
+                    self._feedback_details = {
+                        **(details if isinstance(details, dict) else {}),
+                        "state_id": state.get("state_id"),
+                        "valid": state.get("valid"),
+                    }
                 self.validate_feedback(state)
                 latest = state
             except (TypeError, ValueError, RecursionError, OverflowError) as exc:
@@ -258,9 +293,28 @@ class RoboJuDoBridge:
         self._received_at = now
         self._feedback_timeout = latest["feedback_timeout_s"]
         self._robot_intent = latest["intent"]
-        self._timing_ms["feedback_age_at_publish"] = 1000 * max(latest["joint_age_s"].values())
+        self._record_timing("feedback_age_at_publish", 1000 * max(latest["joint_age_s"].values()))
+        sources = self._feedback_details.get("source_age_ms", {})
+        sources = sources if isinstance(sources, dict) else {}
+        extra_timing = {
+            f"{source}_measurement_age": sources.get(source) for source in ("body", "left_hand", "right_hand")
+        }
+        for name in ("handoff_delay_ms", "snapshot_cache_age_ms"):
+            extra_timing[f"hand_{name.removesuffix('_ms')}"] = self._feedback_details.get(name)
+        previous = self._feedback_details.get("previous_publication")
+        previous = previous if isinstance(previous, dict) else {}
+        for name in ("build_ms", "encode_send_ms"):
+            extra_timing[f"previous_feedback_{name.removesuffix('_ms')}"] = previous.get(name)
+        for name, value in extra_timing.items():
+            self._timing_ms.pop(name, None)
+            try:
+                value = _number(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if value >= 0:
+                self._record_timing(name, value)
         pipeline_timing = latest.get("pipeline_timing_ms", {})
-        for name in ("policy", "env_step"):
+        for name in ("policy", "env_step", "body_snapshot", "hand_snapshot", "feedback_assembly"):
             self._timing_ms.pop(name, None)
             if isinstance(pipeline_timing, dict):
                 try:
@@ -268,7 +322,7 @@ class RoboJuDoBridge:
                 except (TypeError, ValueError, OverflowError):
                     continue
                 if value >= 0:
-                    self._timing_ms[name] = value
+                    self._record_timing(name, value)
         baseline = (*key, latest["command_id"])
         if self._pending_baseline is not None:
             if baseline == self._pending_baseline and now <= self._pending_deadline:
@@ -284,7 +338,8 @@ class RoboJuDoBridge:
                     self.hold_reason = f"IK acknowledgement failed: {exc}"
                     self._warn(exc)
                     return False
-                self._timing_ms["ack_wait"] = 1000 * (now - self._pending_at)
+                self._record_timing("ack_wait", 1000 * (now - self._pending_at))
+                self._ack_count += 1
             else:
                 self._rebase()
                 self._warn(ValueError("arm proposal was not acknowledged; rebasing on fresh feedback"))
@@ -306,11 +361,11 @@ class RoboJuDoBridge:
             )
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
-            self._timing_ms["retarget"] = 1000 * (time.monotonic() - retarget_started)
+            self._record_timing("retarget", 1000 * (time.monotonic() - retarget_started))
             # Remote clocks are never compared. This excludes transit/queueing;
             # the robot performs the authoritative full-age check at application.
             age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - now
-            self._timing_ms["measurement_age_lower_bound"] = 1000 * age_lower_bound
+            self._record_timing("measurement_age_lower_bound", 1000 * age_lower_bound)
             if age_lower_bound > latest["feedback_timeout_s"]:
                 self._rebase()
                 self.status = "stale robot feedback"
@@ -345,6 +400,7 @@ class RoboJuDoBridge:
             self._pending_positions = proposal.copy()
             self._pending_baseline = baseline
             self._pending_at = time.monotonic()
+            self._proposal_count += 1
             self._pending_deadline = self._pending_at + latest["feedback_timeout_s"]
             return True
         except (RuntimeError, TypeError, ValueError, OverflowError, zmq.ZMQError) as exc:
