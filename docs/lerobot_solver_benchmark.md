@@ -129,3 +129,44 @@ The replay sends no robot commands. Collision-enabled geometry processing remain
 a separate bottleneck: the preceding prototype validation did not improve every
 scenario's end-to-end p95, even though solver time improved. Neither this replay
 nor selecting 50 Hz establishes a hard real-time guarantee.
+
+## Single-arm streaming with delayed application
+
+A later live RoboJuDo report used only the right grip, whereas the default replay
+engages both arms and acknowledges every proposal immediately. Code review found
+that every inactive-grip frame called the backend's selective reset, which cleared
+LeRobot's entire warm start. The retargeter now resets only when a previously
+engaged arm is released. Engagement, tracking loss, HOME, and explicit resets
+retain their existing behavior; only confirmed applications commit solver history.
+
+The extended replay compares the prior revision against this fix with the right
+arm active, one proposal selected in three, and application delayed by two control
+steps. Replays are synthetic and unpaced, with no SDK reads or robot commands.
+Three alternating-order repeats of 200 measured frames per scenario were run on
+the same workstation. Active-arm tracking errors are reported; inactive commands
+must remain exactly at their last applied positions.
+
+| Scenario | Retarget median, before → fixed | Retarget p95, before → fixed | Warm solves, before → fixed |
+| --- | ---: | ---: | ---: |
+| Stationary fingers | 2.64 → 2.37 ms | 2.82 → 2.68 ms | 0/600 → 600/600 |
+| Closing fingers | 2.63 → 2.41 ms | 2.80 → 2.70 ms | 0/600 → 600/600 |
+| Servo lag | 2.60 → 2.36 ms | 2.74 → 2.69 ms | 0/600 → 600/600 |
+
+Median iterations fell from five to four. All 3,600 measured comparison frames
+succeeded, with maximum command difference `4.18e-7` rad, and tracking-error changes
+below `2.2e-9` m and `1.9e-8` rad. Each run applied 66 of the 200 measured proposals.
+See [raw streaming measurements](lerobot_streaming_benchmark.json).
+
+```bash
+PYTHONPATH=. python scripts/misc/benchmark_lerobot_latency.py \
+  --active-arms right --ack-every 3 --ack-delay-steps 2 \
+  --output /tmp/lerobot-streaming-latency.json
+```
+
+For before/after comparison, add `--baseline-ref` using the `baseline_commit`
+recorded in the artifact. The baseline now loads the old retargeter as well as
+its backend components. The measured 8–10% median improvement does not establish
+that the entire live latency gap is solved. RoboJuDo's `retarget` timer includes
+XR SDK reads, and real trajectories and shared CPU load differ from this replay.
+The bridge now reports `xr_sample`, `ik`, warm-start counts, and iterations to
+identify the remaining costs without changing command admission or deadlines.

@@ -102,6 +102,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         self.status = "hold"
         self.hold_reason = "waiting for XR input"
         self.target_poses = {}
+        self.solver_diagnostics = {}
         self.reset()
 
     @property
@@ -250,8 +251,10 @@ class ExternalStateRetargeter(CollisionPolicy):
         torso = self.robot.get_T_world_frame(self.profile.reference_frame)
         for side, group in self.profile.groups.items():
             if not self.active[side]:
-                self._references.pop(side, None)
-                self.backend.reset(frozenset(group.joints))
+                # A held-open grip is not a new release on every frame. In
+                # LeRobot a reset also invalidates the other arm's warm start.
+                if self._references.pop(side, None) is not None:
+                    self.backend.reset(frozenset(group.joints))
                 continue
             controller = self._pose(frame, group.controller)
             if side not in self._references:
@@ -355,6 +358,7 @@ class ExternalStateRetargeter(CollisionPolicy):
     ):
         if self._closed:
             raise RuntimeError("Retargeter is closed")
+        self.solver_diagnostics = {}
         if not self.hand_names:
             return self._step_arms(
                 measured_positions, previous_targets, default_positions, position_limits, streaming=streaming, **kwargs
@@ -668,7 +672,20 @@ class ExternalStateRetargeter(CollisionPolicy):
                 default_positions if homing else None,
             )
             for attempt in range(2):
-                proposal = self.backend.propose(problem)
+                started = time.perf_counter()
+                try:
+                    proposal = self.backend.propose(problem)
+                finally:
+                    diagnostics = self.solver_diagnostics
+                    diagnostics["ik_ms"] = diagnostics.get("ik_ms", 0.0) + 1000 * (time.perf_counter() - started)
+                    diagnostics["calls"] = diagnostics.get("calls", 0) + 1
+                    stats = getattr(getattr(self.backend, "solver", None), "last_stats", None)
+                    stats = stats if isinstance(stats, dict) else {}
+                    if "warm_start_used" in stats:
+                        diagnostics["warm_calls"] = diagnostics.get("warm_calls", 0) + int(stats["warm_start_used"])
+                        diagnostics["tracked_calls"] = diagnostics.get("tracked_calls", 0) + 1
+                    if "iter_count" in stats:
+                        diagnostics["iterations"] = diagnostics.get("iterations", 0) + stats["iter_count"]
                 try:
                     candidate = previous.copy()
                     for name, value in proposal.positions.items():

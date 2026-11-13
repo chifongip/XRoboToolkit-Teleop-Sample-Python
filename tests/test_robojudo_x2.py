@@ -600,6 +600,19 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("sent=1, completed=1", logs.output[1])
         self.assertIn("Processing p95 (ms): completion_latency=25.0", logs.output[2])
 
+    def test_diagnostics_separate_sampling_solving_and_warm_start_counts(self):
+        for name, value in (
+            ("retarget", 14.0), ("xr_sample", 2.0), ("ik", 10.0),
+            ("ik_calls", 2), ("ik_tracked_calls", 2), ("ik_warm_calls", 1), ("ik_iterations", 7),
+        ):
+            self.bridge._record_timing(name, value)
+        with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+        self.assertIn("retarget=14.0, xr_sample=2.0, ik=10.0", logs.output[2])
+        self.assertIn("IK: calls=2, warm=1/2; iterations per step p95=7.0", logs.output[3])
+        self.assertEqual(self.bridge._timing_samples, {})
+
     def test_publishes_without_completion_using_new_and_cached_feedback(self):
         self.bridge.feedback.messages.append(self.state)
         self.assertTrue(self.bridge.poll())

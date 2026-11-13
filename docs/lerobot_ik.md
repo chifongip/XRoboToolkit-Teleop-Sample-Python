@@ -389,7 +389,24 @@ command-bound failures across stationary fingers, closing fingers, and servo lag
 Six warmup frames are excluded; acknowledgements and diagnostic FK are outside
 timing. Use `--robot x2` for arms only. To compare against an earlier compatible
 Git revision, add `--baseline-ref PRE_CHANGE_COMMIT`; this loads that revision's
-solver, transaction backend, and numeric adapter without changing the checkout.
+retargeter, solver, transaction backend, and numeric adapter without changing the checkout.
 Comparisons alternate execution order and reject command differences above
 `1e-5` rad. Jetson measurements must use the board's native environment and power
 configuration; desktop results do not establish a 50 Hz timing guarantee.
+
+The default replay engages both arms and applies every proposal immediately.
+For the single-arm streaming case with delayed hand/body completion, use:
+
+```bash
+PYTHONPATH=. python scripts/misc/benchmark_lerobot_latency.py \
+  --active-arms right --ack-every 3 --ack-delay-steps 2 \
+  --output /tmp/lerobot-streaming-latency.json
+```
+
+This selects one proposal in three for simulated application two control steps
+later; other proposals are discarded without committing history. It does not
+sleep or communicate with the robot. Inactive-arm commands must remain exactly
+held, and tracking errors cover active arms only. Use the actual bridge diagnostics
+to measure SDK input costs and real completion delays. Continuous inactive grips
+do not reset the solver; release, engagement, tracking loss, and explicit resets
+still invalidate the appropriate history.

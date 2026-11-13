@@ -447,6 +447,7 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
         soft = self._constraint_parameters(problem.soft, self._soft_rows)
         warm = self._warm if self._warm_starts else None
         compatible = warm is not None and warm["layout"] == self._layout
+        self.last_stats["warm_start_used"] = compatible
         slack_upper = np.zeros(self._soft_rows)
         slack_upper[: len(problem.soft.b)] = self._SLACK_LIMIT
         same_soft = compatible and all(np.array_equal(a, b) for a, b in zip(warm["soft"], soft))
@@ -504,6 +505,7 @@ class LeRobotIKSolver(G1IKSolver, IKSolver):
             solution = opti.solve()
             result = [solution.value(symbol) for symbol in self._outputs]
             self.last_stats = opti.stats()
+        self.last_stats["warm_start_used"] = compatible
         if not self.last_stats.get("success", False):
             raise RuntimeError("IPOPT did not succeed")
         arrays = [np.asarray(value).reshape(-1) for value in result]

@@ -129,6 +129,21 @@ observations and the latest policy, stepping, retargeting, and acknowledgement d
 The measurement-age lower bound excludes transport and queueing; RoboJuDo performs
 the authoritative deadline check using its own clock.
 
+`retarget` includes XR SDK sampling as well as retargeting. The additional
+`xr_sample` and `ik` p95 values separate SDK reads from backend proposal work
+(including solver transactions). The `IK` line reports solve attempts, warm-start
+use, and total IPOPT iterations per step. Idle/anchor frames do not reuse old solver
+metrics. The synthetic latency benchmark excludes SDK reads and, by default,
+engages both arms and acknowledges every command immediately. Its optional
+single-arm/delayed-application replay is described in [the LeRobot guide](lerobot_ik.md).
+
+Keeping one grip released previously reset LeRobot's whole warm start on every
+frame. The retargeter now resets on an actual release transition, preserving the
+continuing arm's accepted warm start. Completion still commits only the exact
+proposal reported applied by the robot; publishing or discarding proposals cannot
+advance solver history. Completion latency starts after publication and includes
+robot application and acknowledgement delays, so faster IK alone cannot remove it.
+
 To measure SDK updates without IK or ZMQ, stop the bridge and other SDK clients,
 leave PC Service/headset streaming, and run:
 

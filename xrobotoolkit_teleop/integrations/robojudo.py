@@ -293,6 +293,8 @@ class RoboJuDoBridge:
             ("policy", "policy"),
             ("env_step", "env_step"),
             ("retarget", "retarget"),
+            ("xr_sample", "xr_sample"),
+            ("ik", "ik"),
             ("completion_latency", "completion_latency"),
         ):
             values = self._timing_samples.get(name)
@@ -300,6 +302,18 @@ class RoboJuDoBridge:
                 stages.append(f"{label}={np.percentile(values, 95):.1f}")
         if stages:
             logger.info("Processing p95 (ms): %s", ", ".join(stages))
+        if self._timing_samples.get("ik_calls"):
+            calls = sum(self._timing_samples["ik_calls"])
+            tracked = sum(self._timing_samples.get("ik_tracked_calls", ()))
+            warm = sum(self._timing_samples.get("ik_warm_calls", ()))
+            iterations = self._timing_samples.get("ik_iterations")
+            logger.info(
+                "IK: calls=%d, warm=%d/%d%s",
+                calls,
+                warm,
+                tracked,
+                f"; iterations per step p95={np.percentile(iterations, 95):.1f}" if iterations else "",
+            )
         self._timing_samples.clear()
         self._proposal_count = self._completion_count = 0
         self._xr_updates = 0
@@ -413,6 +427,7 @@ class RoboJuDoBridge:
         try:
             retarget_started = time.monotonic()
             frame = self._xr_frame() if latest["intent"] == "TRACK" else None
+            self._record_timing("xr_sample", 1000 * (time.monotonic() - retarget_started))
             proposal = self.retargeter.step(
                 latest["positions"],
                 latest["last_commanded_positions"],
@@ -429,6 +444,13 @@ class RoboJuDoBridge:
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
             self._record_timing("retarget", 1000 * (time.monotonic() - retarget_started))
+            diagnostics = getattr(self.retargeter, "solver_diagnostics", {})
+            if isinstance(diagnostics, dict) and diagnostics.get("calls"):
+                self._record_timing("ik", diagnostics["ik_ms"])
+                self._record_timing("ik_calls", diagnostics["calls"])
+                for key in ("tracked_calls", "warm_calls", "iterations"):
+                    if key in diagnostics:
+                        self._record_timing(f"ik_{key}", diagnostics[key])
             # Remote clocks are never compared. This excludes transit/queueing;
             # the robot performs the authoritative full-age check at application.
             age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - self._received_at
