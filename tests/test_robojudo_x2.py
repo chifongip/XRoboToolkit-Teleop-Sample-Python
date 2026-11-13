@@ -530,6 +530,17 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(self.bridge.poll())
         self.assertEqual(len(self.bridge.commands.frames), 2)
 
+    def test_matching_acknowledgement_can_arrive_after_local_wait_deadline(self):
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            clock.return_value = 100.11
+            self.state["state_id"] += 1
+            self.state["command_id"] += 1
+            self.bridge.feedback.messages.append(self.state)
+            self.assertTrue(self.bridge.poll())
+            self.assertAlmostEqual(self.bridge._timing_ms["ack_wait"], 110.0)
+
     def test_roundtrip_diagnostics_include_pipeline_compute_and_ack_delays(self):
         self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
         with patch("time.monotonic", return_value=100.0) as clock:

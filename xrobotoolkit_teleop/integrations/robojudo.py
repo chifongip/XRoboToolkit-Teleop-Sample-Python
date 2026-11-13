@@ -276,7 +276,6 @@ class RoboJuDoBridge:
             expected = (*self._pending_baseline[:2], self._pending_baseline[2] + 1)
             if (
                 baseline == expected
-                and now <= self._pending_deadline
                 and latest["last_commanded_positions"] == self._pending_positions
             ):
                 try:

@@ -160,13 +160,13 @@ class ProfileBridgeTests(unittest.TestCase):
         self.assertTrue(self.poll(ack=True))
         self.assertEqual(self.solver.applied, positions)
 
-    def test_later_feedback_cannot_extend_pending_ack_deadline(self):
+    def test_robot_acknowledgement_is_authoritative_after_local_wait_deadline(self):
         self.engage_and_propose()
         self.state["feedback_timeout_s"] = 1.0
         with patch("time.monotonic", return_value=self.bridge._pending_at + 0.11):
             self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.solver.history, 0)
-        self.assertIsNone(self.solver.applied)
+        self.assertEqual(self.solver.history, 1)
+        self.assertIsNotNone(self.solver.applied)
 
     def test_retargeter_rejecting_acknowledgement_holds(self):
         self.engage_and_propose()

@@ -5,6 +5,7 @@ import math
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
+from itertools import product
 from numbers import Real
 
 import numpy as np
@@ -242,6 +243,36 @@ class ExternalStateRetargeter(CollisionPolicy):
             self.target_poses[side] = local.tolist()
         return True
 
+    def _application_samples(self, start, candidate):
+        samples = self._collision_motion_samples(start, candidate, bool(self.hand_couplings))
+        if not self.hand_names:
+            return samples
+        # Arms and the two hand handles have independent application timing.
+        # Include partial application, not just their synchronized diagonal.
+        groups = []
+        finger_offsets = set()
+        for names in self.profile.hands.groups.values():
+            offsets = {self.robot.get_joint_offset(n) for n in names}
+            offsets.update(passive for passive, source, _ in self.hand_couplings if source in offsets)
+            finger_offsets.update(offsets)
+            groups.append(sorted(offsets))
+        groups.insert(0, sorted(set(range(len(start))) - finger_offsets))
+        paths = [np.unique(np.vstack((start[offsets], samples[:, offsets])), axis=0) for offsets in groups]
+        count = math.prod(len(path) for path in paths)
+        if count > self.MAX_COLLISION_SAMPLES:
+            raise RuntimeError("independent arm/hand motion exceeds sampling budget")
+
+        def configurations():
+            for parts in product(*paths):
+                configuration = start.copy()
+                for offsets, values in zip(groups, parts, strict=True):
+                    configuration[offsets] = values
+                yield configuration
+            # Recovery progress must be assessed at the final target.
+            yield candidate
+
+        return configurations()
+
     def _validate_motion(self, measured, previous, candidate):
         robot = self.robot
         try:
@@ -251,7 +282,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                 robot.state.q = start
                 distances = self.collision_checker.clearances(self.collision_margin)
                 floor = np.minimum(np.minimum(distances, measured_distances), self.collision_margin)
-                for configuration in self._collision_motion_samples(start, candidate, bool(self.hand_couplings)):
+                for configuration in self._application_samples(start, candidate):
                     robot.state.q = configuration
                     values = (
                         self.collision_checker.clearance_bounds(floor)
@@ -269,7 +300,8 @@ class ExternalStateRetargeter(CollisionPolicy):
                             "Robot command path violates self-collision clearance "
                             f"({objects[a].link} vs {objects[b].link})"
                         )
-                    floor = np.maximum(floor, np.minimum(values, self.collision_margin))
+                    if not self.hand_names:
+                        floor = np.maximum(floor, np.minimum(values, self.collision_margin))
                 violating = measured_distances < self.collision_margin - 1e-6
                 if (
                     start is measured

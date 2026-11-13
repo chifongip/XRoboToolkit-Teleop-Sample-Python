@@ -11,6 +11,38 @@ from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter,
 
 
 class OmniHandRetargeterTests(unittest.TestCase):
+    def test_application_samples_include_independent_arm_and_hand_progress(self):
+        start = self.r.robot.state.q.copy()
+        target = start.copy()
+        names = [self.r.arm_names[0], *(names[0] for names in self.r.profile.hands.groups.values())]
+        offsets = [self.r.robot.get_joint_offset(n) for n in names]
+        target[offsets] += 0.01
+        self.r._project_hands(target)
+        samples = list(self.r._application_samples(start, target))
+        for mask in range(8):
+            expected = [target[offset] if mask & (1 << i) else start[offset] for i, offset in enumerate(offsets)]
+            self.assertTrue(any(np.allclose(sample[offsets], expected) for sample in samples), mask)
+
+    def test_collision_in_partial_hand_application_rejects_combined_motion(self):
+        start = self.r.robot.state.q.copy()
+        target = start.copy()
+        offsets = [self.r.robot.get_joint_offset(names[0]) for names in self.r.profile.hands.groups.values()]
+        target[offsets] += 0.01
+        self.r._project_hands(target)
+
+        def clearances(*args):
+            progress = self.r.robot.state.q[offsets] - start[offsets]
+            # Both endpoints and the synchronized path are clear. Only a
+            # left-hand write arriving before the right-hand write collides.
+            return np.array([-0.01 if progress[0] > 0.005 and progress[1] < 0.005 else 0.1])
+
+        with (
+            patch.object(self.r.collision_checker, "clearances", side_effect=clearances),
+            patch.object(self.r.collision_checker, "can_bound", False),
+            self.assertRaisesRegex(RuntimeError, "self-collision clearance"),
+        ):
+            self.r._validate_motion(start, start.copy(), target)
+
     def test_couplings_cannot_overwrite_arms_or_duplicate_passive_joints(self):
         original = self.r.profile.hands
         first, *remaining = original.couplings
