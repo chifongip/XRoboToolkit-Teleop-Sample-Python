@@ -86,7 +86,7 @@ class ExternalStateRetargeter(CollisionPolicy):
             self.tasks = {
                 key: PoseTarget(self.robot.get_T_world_frame(g.frame)) for key, g in self.profile.groups.items()
             }
-            self.collision_checker = CollisionChecker(self.robot)
+            self.collision_checker = CollisionChecker(self.robot) if settings.collision_checking else None
             self.collision_constraint = LinearConstraint(np.zeros((1, self.robot.model.nq)), np.ones(1))
             self.collision_margin = settings.collision_margin
             self.collision_trigger = settings.collision_trigger
@@ -274,6 +274,10 @@ class ExternalStateRetargeter(CollisionPolicy):
         return configurations()
 
     def _validate_motion(self, measured, previous, candidate):
+        if not all(np.isfinite(configuration).all() for configuration in (measured, previous, candidate)):
+            raise RuntimeError("non-finite robot command configuration")
+        if not self.settings.collision_checking:
+            return
         robot = self.robot
         try:
             robot.state.q = measured
@@ -451,6 +455,26 @@ class ExternalStateRetargeter(CollisionPolicy):
         for passive, source, coefficients in self.hand_couplings:
             configuration[passive] = np.polynomial.polynomial.polyval(configuration[source], coefficients)
 
+    def _collision_constraints(self, previous, offsets):
+        """Return arm-space IK constraints; disabled checks never query geometry."""
+        empty = LinearConstraint(np.zeros((0, len(offsets))), np.zeros(0))
+        if not self.settings.collision_checking:
+            return empty, empty
+        distances = self.collision_checker.clearances(self.collision_trigger)
+        recovering = np.any(distances < self.collision_margin - 1e-6)
+        self._update_collision_constraint(self.collision_constraint)
+        recovery = self._add_recovery_constraint(distances) if recovering else None
+        fixed = previous.copy()
+        fixed[offsets] = 0
+
+        def controlled(constraint):
+            return LinearConstraint(constraint.A[:, offsets].copy(), constraint.b - constraint.A @ fixed)
+
+        return (
+            controlled(recovery or self.collision_constraint),
+            controlled(self.collision_constraint) if recovering else empty,
+        )
+
     def _step_arms(
         self,
         measured_positions,
@@ -492,7 +516,8 @@ class ExternalStateRetargeter(CollisionPolicy):
         for name, value in measured_positions.items():
             robot.set_joint(name, value)
         robot.update_kinematics()
-        self.collision_checker.clear_cache()
+        if self.collision_checker is not None:
+            self.collision_checker.clear_cache()
         measured = robot.state.q.copy()
         previous = measured.copy()
         for name in self.arm_names:
@@ -586,18 +611,8 @@ class ExternalStateRetargeter(CollisionPolicy):
                     return self._output(candidate)
                 except RuntimeError:
                     robot.state.q = previous.copy()
-            distances = self.collision_checker.clearances(self.collision_trigger)
-            recovering = np.any(distances < self.collision_margin - 1e-6)
-            self._update_collision_constraint(self.collision_constraint)
-            recovery = self._add_recovery_constraint(distances) if recovering else None
             offsets = np.array([robot.get_joint_offset(n) for n in self.arm_names])
-            fixed = previous.copy()
-            fixed[offsets] = 0
-
-            def controlled(constraint):
-                return LinearConstraint(constraint.A[:, offsets].copy(), constraint.b - constraint.A @ fixed)
-
-            empty = LinearConstraint(np.zeros((0, len(offsets))), np.zeros(0))
+            hard, soft = self._collision_constraints(previous, offsets)
             problem = IKProblem(
                 {n: robot.get_joint(n) for n in self.joint_names},
                 previous_targets,
@@ -605,8 +620,8 @@ class ExternalStateRetargeter(CollisionPolicy):
                 frozenset(n for k, names in self.arm_joints.items() if self.active[k] for n in names),
                 np.array([bounds[n][0] for n in self.arm_names]),
                 np.array([bounds[n][1] for n in self.arm_names]),
-                controlled(recovery or self.collision_constraint),
-                controlled(self.collision_constraint) if recovering else empty,
+                hard,
+                soft,
                 dt,
                 default_positions if homing else None,
             )

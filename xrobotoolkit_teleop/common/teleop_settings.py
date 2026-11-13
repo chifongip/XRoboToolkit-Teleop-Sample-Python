@@ -15,9 +15,14 @@ class TeleopSettings:
     collision_trigger: float = 0.08
     tracking_timeout_s: float = 0.25
     grip_threshold: float = 0.9
+    collision_checking: bool = True
 
     def __post_init__(self):
+        if type(self.collision_checking) is not bool:
+            raise ValueError("collision_checking must be a boolean")
         for name, value in vars(self).items():
+            if name == "collision_checking":
+                continue
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
         if self.collision_trigger <= self.collision_margin:

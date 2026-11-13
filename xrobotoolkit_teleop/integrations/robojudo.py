@@ -274,10 +274,7 @@ class RoboJuDoBridge:
             if baseline == self._pending_baseline and now <= self._pending_deadline:
                 return False
             expected = (*self._pending_baseline[:2], self._pending_baseline[2] + 1)
-            if (
-                baseline == expected
-                and latest["last_commanded_positions"] == self._pending_positions
-            ):
+            if baseline == expected and latest["last_commanded_positions"] == self._pending_positions:
                 try:
                     if not self.retargeter.acknowledge(latest["last_commanded_positions"]):
                         raise RuntimeError("retargeter has no matching pending proposal")
@@ -373,8 +370,13 @@ def main(
     xr_diagnostics: bool = False,
     robot: str = "x2",
     ik_backend: BackendName = BackendName.placo,
+    collision_checking: tyro.conf.FlagCreatePairsOff[bool] = False,
 ):
-    """Publish checked joint targets from live measured RoboJuDo feedback."""
+    """Publish bounded joint targets from live measured RoboJuDo feedback.
+
+    Args:
+        collision_checking: Enable collision avoidance and arm/hand path checks; omitted means disabled.
+    """
     logging.basicConfig(level=logging.INFO)
     settings = TeleopSettings(
         scale_factor=scale_factor,
@@ -386,10 +388,12 @@ def main(
         control_frequency=control_frequency,
         tracking_timeout_s=tracking_timeout_s,
         grip_threshold=grip_threshold,
+        collision_checking=collision_checking,
     )
     if robot not in PROFILES:
         raise ValueError(f"Unknown robot {robot!r}; choose from {tuple(PROFILES)}")
     bridge = RoboJuDoBridge(command_endpoint, feedback_endpoint, settings, robot=robot, ik_backend=ik_backend)
+    logger.info("XR collision checking: %s", "enabled" if settings.collision_checking else "disabled")
     logger.info(
         "Robot bridge publishing %s, receiving %s; release all grips before engaging",
         command_endpoint,
