@@ -100,6 +100,9 @@ class ProfileBridgeTests(unittest.TestCase):
             arm_velocity_limit=1.0,
             return_velocity_limit=0.5,
             feedback_timeout_s=0.1,
+            filter_contract="robojudo_filter_v1",
+            ema_alpha=0.0,
+            arm_joint_names=list(self.bridge.retargeter.arm_names),
         )
         self.frame = XRFrame(0, {"headset": [0, 0, 0, 0, 0, 0, 1], "wand": [0, 0, 0, 0, 0, 0, 1]}, {"reach": 0.0})
 
@@ -156,7 +159,7 @@ class ProfileBridgeTests(unittest.TestCase):
         with patch.object(self.bridge.retargeter, "_validate_motion", side_effect=reject_full):
             self.assertTrue(self.poll(ack=True))
         positions = self.bridge.commands.frames[-1]["positions"]
-        self.assertEqual(len(attempts), 2)
+        self.assertEqual(len(attempts), 3)  # Includes the final filtered-path check.
         self.assertLess(positions["axis"] - self.state["last_commanded_positions"]["axis"], 0.001)
         self.assertEqual(float(np.float32(positions["axis"])), positions["axis"])
         self.assertTrue(self.poll(ack=True))

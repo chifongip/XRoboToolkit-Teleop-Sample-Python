@@ -16,6 +16,7 @@ from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings
 from xrobotoolkit_teleop.ik.registry import BackendName
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
 from xrobotoolkit_teleop.integrations.robot_profiles import PROFILES
+from xrobotoolkit_teleop.integrations.target_filter import filter_targets
 
 logger = logging.getLogger(__name__)
 
@@ -205,10 +206,21 @@ class RoboJuDoBridge:
         for key in ("control_dt", "arm_velocity_limit", "return_velocity_limit", "feedback_timeout_s"):
             if _number(state.get(key)) <= 0:
                 raise ValueError(f"invalid positive parameter: {key}")
-        if state.get("hand_command_mode", "velocity_limited") not in {"filtered", "velocity_limited", "direct"}:
+        if state.get("hand_command_mode", "filtered") not in {"filtered", "direct"}:
             raise ValueError("invalid hand command mode")
         if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
             raise ValueError("invalid positive hand_velocity_limit")
+        if state.get("filter_contract") != "robojudo_filter_v1":
+            raise ValueError("incompatible robot filter contract")
+        arms = state.get("arm_joint_names")
+        if (
+            not isinstance(arms, list)
+            or len(arms) != len(self.retargeter.arm_names)
+            or set(arms) != set(self.retargeter.arm_names)
+        ):
+            raise ValueError("incompatible arm joint names")
+        if not 0 <= _number(state.get("ema_alpha")) < 1:
+            raise ValueError("invalid EMA alpha")
         if not all(0 <= age <= state["feedback_timeout_s"] for age in state["joint_age_s"].values()):
             raise ValueError("robot joint measurements are stale")
 
@@ -441,16 +453,12 @@ class RoboJuDoBridge:
                 desired_only=True,
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
-                hand_command_mode=latest.get("hand_command_mode", "velocity_limited"),
+                hand_command_mode=latest.get("hand_command_mode", "filtered"),
                 hand_velocity_limit=latest.get("hand_velocity_limit"),
                 streaming=True,
             )
             desired_positions = proposal
             if proposal is not None:
-                from .target_filter import filter_targets
-
-                if latest.get("filter_contract") != "robojudo_filter_v1":
-                    raise ValueError("incompatible robot filter contract")
                 arms = set(latest["arm_joint_names"])
                 homing = self.retargeter.status == "homing"
                 speeds = {
@@ -463,6 +471,34 @@ class RoboJuDoBridge:
                     else (0.0 if homing else latest["hand_velocity_limit"])
                     for n in proposal
                 }
+                # Bound desired targets by bridge settings and model velocities
+                # before predicting the robot-owned filter. Both peers still
+                # reproduce the same issued target without a protocol exception.
+                local_speeds = {}
+                for name in proposal:
+                    if name in arms:
+                        local_speeds[name] = min(
+                            speeds[name], self.settings.arm_velocity_limit, self.retargeter.velocities[name]
+                        )
+                        if homing:
+                            local_speeds[name] = min(local_speeds[name], self.settings.return_velocity_limit)
+                    else:
+                        local_speeds[name] = min(
+                            speeds[name],
+                            self.settings.hand_velocity_limit,
+                            self.retargeter.profile.hands.velocities[name],
+                        )
+                bounded = filter_targets(
+                    desired_positions,
+                    latest["last_commanded_positions"],
+                    latest["position_limits"],
+                    local_speeds,
+                    latest["control_dt"],
+                    0.0,
+                )
+                if latest.get("hand_command_mode") == "direct" and not homing:
+                    bounded.update({n: desired_positions[n] for n in proposal if n not in arms})
+                desired_positions = bounded
                 proposal = filter_targets(
                     desired_positions,
                     latest["last_commanded_positions"],
@@ -530,7 +566,7 @@ class RoboJuDoBridge:
                 "positions": proposal,
                 "desired_positions": desired_positions,
                 "filter_contract": "robojudo_filter_v1",
-                "hand_command_mode": latest.get("hand_command_mode", "velocity_limited"),
+                "hand_command_mode": latest.get("hand_command_mode", "filtered"),
             }
             if visualize:
                 message["target_poses"] = self.retargeter.target_poses

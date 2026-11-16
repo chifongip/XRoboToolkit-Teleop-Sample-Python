@@ -5,6 +5,7 @@ import json
 import os
 import time
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -468,7 +469,30 @@ class BridgeTests(unittest.TestCase):
             "arm_velocity_limit": 8.0,
             "return_velocity_limit": 1.0,
             "feedback_timeout_s": 0.1,
+            "filter_contract": "robojudo_filter_v1",
+            "ema_alpha": 0.0,
+            "arm_joint_names": list(self.bridge.retargeter.arm_names),
         }
+
+    def test_home_respects_bridge_and_model_velocity_caps(self):
+        bridge = self.bridge
+        bridge.settings = replace(bridge.settings, return_velocity_limit=0.05)
+        bridge.retargeter.settings = bridge.settings
+        name = "left_shoulder_pitch_joint"
+        self.state["last_commanded_positions"] = self.home.copy()
+        self.state["last_commanded_positions"][name] = float(np.float32(self.home[name] + 0.2))
+        bridge.feedback.messages.append(self.state)
+        self.assertTrue(bridge.poll())
+        positions = bridge.commands.frames[-1]["positions"]
+        self.assertLessEqual(abs(positions[name] - self.state["last_commanded_positions"][name]), 0.001)
+
+    def test_invalid_filter_metadata_holds_without_crashing(self):
+        for key, value in (("filter_contract", None), ("arm_joint_names", []), ("ema_alpha", True)):
+            with self.subTest(key=key):
+                state = dict(self.state, **{key: value})
+                self.bridge.feedback.messages.append(state)
+                self.assertFalse(self.bridge.poll())
+                self.assertEqual(self.bridge.status, "hold")
 
     def test_home_roundtrip_without_sdk_initialization(self):
         self.state["visualize_targets"] = True
@@ -602,8 +626,13 @@ class BridgeTests(unittest.TestCase):
 
     def test_diagnostics_separate_sampling_solving_and_warm_start_counts(self):
         for name, value in (
-            ("retarget", 14.0), ("xr_sample", 2.0), ("ik", 10.0),
-            ("ik_calls", 2), ("ik_tracked_calls", 2), ("ik_warm_calls", 1), ("ik_iterations", 7),
+            ("retarget", 14.0),
+            ("xr_sample", 2.0),
+            ("ik", 10.0),
+            ("ik_calls", 2),
+            ("ik_tracked_calls", 2),
+            ("ik_warm_calls", 1),
+            ("ik_iterations", 7),
         ):
             self.bridge._record_timing(name, value)
         with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):

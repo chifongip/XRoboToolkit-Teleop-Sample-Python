@@ -353,7 +353,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         position_limits,
         *,
         hand_velocity_limit=None,
-        hand_command_mode="velocity_limited",
+        hand_command_mode="filtered",
         desired_only=False,
         streaming=False,
         **kwargs,
@@ -435,7 +435,7 @@ class ExternalStateRetargeter(CollisionPolicy):
             for n, value in proposal.items():
                 candidate[robot.get_joint_offset(n)] = value
             held = candidate.copy()
-            if hand_command_mode not in {"filtered", "velocity_limited", "direct"}:
+            if hand_command_mode not in {"filtered", "direct"}:
                 raise ValueError("invalid hand command mode")
             dt = kwargs.get("control_dt") or 1 / self.settings.control_frequency
             cap = self.settings.hand_velocity_limit

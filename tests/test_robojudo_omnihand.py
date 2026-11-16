@@ -44,7 +44,7 @@ class OmniHandStreamingBridgeTests(unittest.TestCase):
             arm_velocity_limit=8.0,
             return_velocity_limit=1.0,
             hand_velocity_limit=2.0,
-            hand_command_mode="velocity_limited",
+            hand_command_mode="filtered",
             feedback_timeout_s=0.3,
         )
         poses = {name: [0, 0, 0, 0, 0, 0, 1] for name in ("headset", "left_controller", "right_controller")}
@@ -124,7 +124,7 @@ class OmniHandRetargeterTests(unittest.TestCase):
             n: np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]) for n in ("headset", "left_controller", "right_controller")
         }
 
-    def step(self, grip=0.0, trigger=0.0, right_grip=0.0, right_trigger=0.0, intent="TRACK", hand_command_mode="velocity_limited"):
+    def step(self, grip=0.0, trigger=0.0, right_grip=0.0, right_trigger=0.0, intent="TRACK", hand_command_mode="filtered"):
         self.timestamp += 1
         frame = XRFrame(
             self.timestamp,
