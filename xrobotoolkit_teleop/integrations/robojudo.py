@@ -205,6 +205,8 @@ class RoboJuDoBridge:
         for key in ("control_dt", "arm_velocity_limit", "return_velocity_limit", "feedback_timeout_s"):
             if _number(state.get(key)) <= 0:
                 raise ValueError(f"invalid positive parameter: {key}")
+        if state.get("hand_command_mode", "velocity_limited") not in {"velocity_limited", "direct"}:
+            raise ValueError("invalid hand command mode")
         if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
             raise ValueError("invalid positive hand_velocity_limit")
         if not all(0 <= age <= state["feedback_timeout_s"] for age in state["joint_age_s"].values()):
@@ -438,6 +440,7 @@ class RoboJuDoBridge:
                 control_dt=latest["control_dt"],
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
+                hand_command_mode=latest.get("hand_command_mode", "velocity_limited"),
                 hand_velocity_limit=latest.get("hand_velocity_limit"),
                 streaming=True,
             )
@@ -476,6 +479,7 @@ class RoboJuDoBridge:
                 "intent": latest["intent"],
                 "status": self.status,
                 "positions": proposal,
+                "hand_command_mode": latest.get("hand_command_mode", "velocity_limited"),
             }
             if visualize:
                 message["target_poses"] = self.retargeter.target_poses

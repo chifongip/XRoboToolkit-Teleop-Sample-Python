@@ -41,6 +41,7 @@ class OmniHandStreamingBridgeTests(unittest.TestCase):
             arm_velocity_limit=8.0,
             return_velocity_limit=1.0,
             hand_velocity_limit=2.0,
+            hand_command_mode="velocity_limited",
             feedback_timeout_s=0.3,
         )
         poses = {name: [0, 0, 0, 0, 0, 0, 1] for name in ("headset", "left_controller", "right_controller")}
@@ -120,7 +121,7 @@ class OmniHandRetargeterTests(unittest.TestCase):
             n: np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]) for n in ("headset", "left_controller", "right_controller")
         }
 
-    def step(self, grip=0.0, trigger=0.0, right_grip=0.0, right_trigger=0.0, intent="TRACK"):
+    def step(self, grip=0.0, trigger=0.0, right_grip=0.0, right_trigger=0.0, intent="TRACK", hand_command_mode="velocity_limited"):
         self.timestamp += 1
         frame = XRFrame(
             self.timestamp,
@@ -137,6 +138,7 @@ class OmniHandRetargeterTests(unittest.TestCase):
             frame=frame,
             control_dt=0.02,
             hand_velocity_limit=2.0,
+            hand_command_mode=hand_command_mode,
         )
 
     def engage(self):
@@ -155,6 +157,14 @@ class OmniHandRetargeterTests(unittest.TestCase):
         self.assertGreater(result["L_index_mcp_joint"], 0.0)
         self.assertEqual(result["R_index_mcp_joint"], 0.0)
         self.assertLessEqual(max(abs(result[n]) for n in self.r.hand_names), 0.040001)
+        self.assertTrue(self.r.acknowledge(result))
+
+    def test_direct_target_skips_velocity_ramp(self):
+        self.engage()
+        result = self.step(trigger=1.0, hand_command_mode="direct")
+        self.assertIsNotNone(result)
+        self.assertGreater(result["L_index_mcp_joint"], 0.04)
+        self.assertEqual(result["R_index_mcp_joint"], 0.0)
         self.assertTrue(self.r.acknowledge(result))
 
     def test_right_hand_mirroring_and_home_holds(self):
