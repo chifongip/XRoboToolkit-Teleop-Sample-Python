@@ -38,7 +38,7 @@ class G1IKSolver:
     All public joint dictionaries use URDF joint names and radians.
     """
 
-    FILTER_WEIGHTS = np.array([0.4, 0.3, 0.2, 0.1])  # oldest to newest, as in LeRobot
+    FILTER_WEIGHTS = np.array([0.1, 0.2, 0.3, 0.4])  # oldest to newest; matches dex convolution
 
     def __init__(self, urdf_path, joint_names, position_limits, frames=None, groups=None):
         self.pin, cpin, ca = load_dependencies()

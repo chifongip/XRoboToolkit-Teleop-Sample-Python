@@ -135,10 +135,17 @@ class LeRobotIKTests(unittest.TestCase):
         for sample in samples:
             with patch.object(b.opti, "solve", return_value=Mock(value=Mock(return_value=sample))):
                 result = b.solve(measured, measured, targets, active)
-        np.testing.assert_allclose(b._vector(result), seed + 0.01, atol=1e-12)
+        # dex convolves oldest-to-newest samples with [0.4, 0.3, 0.2, 0.1],
+        # giving the newest sample the largest contribution.
+        dex_filtered = np.array([
+            np.convolve(np.array(samples)[:, i], [0.4, 0.3, 0.2, 0.1], mode="valid")[0]
+            for i in range(len(seed))
+        ])
+        np.testing.assert_allclose(b._vector(result), dex_filtered, atol=1e-12)
+        np.testing.assert_allclose(b._vector(result), seed + 0.02, atol=1e-12)
         with patch.object(b.opti, "solve", return_value=Mock(value=Mock(return_value=samples[-1]))):
             duplicate = b.solve(measured, measured, targets, active)
-        np.testing.assert_allclose(b._vector(duplicate), seed + 0.01, atol=1e-12)
+        np.testing.assert_allclose(b._vector(duplicate), seed + 0.02, atol=1e-12)
         before = b._previous.copy()
         history = np.array(b._history)
         for failure in (RuntimeError("failed"), np.full(14, np.nan)):
@@ -197,7 +204,7 @@ class LeRobotIKTests(unittest.TestCase):
         raw = seed + 0.04
         raw[left] = b._vector(previous)[left]
         released = solve(raw, measured, previous, {"left_arm": False, "right_arm": True})
-        np.testing.assert_allclose(b._vector(released)[left], seed[left] + 0.01, atol=1e-12)
+        np.testing.assert_allclose(b._vector(released)[left], seed[left] + 0.02, atol=1e-12)
         changed = measured.copy()
         for name in changed:
             if name.startswith("left_"):
@@ -205,8 +212,8 @@ class LeRobotIKTests(unittest.TestCase):
         raw = seed + 0.05
         raw[left] = b._vector(changed)[left] + 0.01
         engaged = solve(raw, changed, released, {"left_arm": True, "right_arm": True})
-        np.testing.assert_allclose(b._vector(engaged)[left], seed[left] + 0.301, atol=1e-12)
-        np.testing.assert_allclose(b._vector(engaged)[right], seed[right] + 0.03, atol=1e-12)
+        np.testing.assert_allclose(b._vector(engaged)[left], seed[left] + 0.304, atol=1e-12)
+        np.testing.assert_allclose(b._vector(engaged)[right], seed[right] + 0.04, atol=1e-12)
 
     def test_reengagement_rebases_after_a_failed_release_solve(self):
         c = self.make_controller()
