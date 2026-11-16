@@ -354,6 +354,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         *,
         hand_velocity_limit=None,
         hand_command_mode="velocity_limited",
+        desired_only=False,
         streaming=False,
         **kwargs,
     ):
@@ -362,7 +363,13 @@ class ExternalStateRetargeter(CollisionPolicy):
         self.solver_diagnostics = {}
         if not self.hand_names:
             return self._step_arms(
-                measured_positions, previous_targets, default_positions, position_limits, streaming=streaming, **kwargs
+                measured_positions,
+                previous_targets,
+                default_positions,
+                position_limits,
+                streaming=streaming,
+                desired_only=desired_only,
+                **kwargs,
             )
         self.reject()
         if any(
@@ -388,6 +395,7 @@ class ExternalStateRetargeter(CollisionPolicy):
             subset(previous_targets),
             subset(default_positions),
             subset(position_limits),
+            desired_only=desired_only,
             held_finger_targets={n: previous_targets[n] for n in self.hand_names},
             streaming=streaming,
             **kwargs,
@@ -427,7 +435,7 @@ class ExternalStateRetargeter(CollisionPolicy):
             for n, value in proposal.items():
                 candidate[robot.get_joint_offset(n)] = value
             held = candidate.copy()
-            if hand_command_mode not in {"velocity_limited", "direct"}:
+            if hand_command_mode not in {"filtered", "velocity_limited", "direct"}:
                 raise ValueError("invalid hand command mode")
             dt = kwargs.get("control_dt") or 1 / self.settings.control_frequency
             cap = self.settings.hand_velocity_limit
@@ -462,7 +470,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                         np.maximum(lower, current - speeds * dt), np.minimum(upper, current + speeds * dt)
                     )
                     values = np.clip((current + fraction * delta).astype(np.float32), low32, high32)
-                    if hand_command_mode == "direct":
+                    if hand_command_mode == "direct" or desired_only:
                         low32, high32 = _float32_bounds(lower, upper)
                         values = np.clip(target.astype(np.float32), low32, high32)
                     for n, value in zip(names, values, strict=True):
@@ -532,6 +540,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         control_dt=None,
         arm_velocity_limit=None,
         return_velocity_limit=None,
+        desired_only=False,
         held_finger_targets=None,
         streaming=False,
     ):
@@ -626,6 +635,8 @@ class ExternalStateRetargeter(CollisionPolicy):
                 offset = robot.get_joint_offset(name)
                 distance = min(cap, self.velocities[name]) * dt
                 bounds[name] = (max(low, previous[offset] - distance), min(high, previous[offset] + distance))
+                if desired_only:
+                    bounds[name] = (low, high)
                 if bounds[name][0] > bounds[name][1]:
                     raise RuntimeError("previous target is outside compatible limits")
                 if not self.active[self._joint_groups[name]]:

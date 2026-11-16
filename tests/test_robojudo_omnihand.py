@@ -37,6 +37,9 @@ class OmniHandStreamingBridgeTests(unittest.TestCase):
                 n: list(bounds)
                 for n, bounds in (bridge.retargeter.limits | bridge.retargeter.profile.hands.limits).items()
             },
+            filter_contract="robojudo_filter_v1",
+            ema_alpha=0.0,
+            arm_joint_names=list(bridge.retargeter.arm_names),
             control_dt=0.02,
             arm_velocity_limit=8.0,
             return_velocity_limit=1.0,

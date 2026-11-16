@@ -205,7 +205,7 @@ class RoboJuDoBridge:
         for key in ("control_dt", "arm_velocity_limit", "return_velocity_limit", "feedback_timeout_s"):
             if _number(state.get(key)) <= 0:
                 raise ValueError(f"invalid positive parameter: {key}")
-        if state.get("hand_command_mode", "velocity_limited") not in {"velocity_limited", "direct"}:
+        if state.get("hand_command_mode", "velocity_limited") not in {"filtered", "velocity_limited", "direct"}:
             raise ValueError("invalid hand command mode")
         if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
             raise ValueError("invalid positive hand_velocity_limit")
@@ -438,12 +438,61 @@ class RoboJuDoBridge:
                 intent=latest["intent"],
                 frame=frame,
                 control_dt=latest["control_dt"],
+                desired_only=True,
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
                 hand_command_mode=latest.get("hand_command_mode", "velocity_limited"),
                 hand_velocity_limit=latest.get("hand_velocity_limit"),
                 streaming=True,
             )
+            desired_positions = proposal
+            if proposal is not None:
+                from .target_filter import filter_targets
+
+                if latest.get("filter_contract") != "robojudo_filter_v1":
+                    raise ValueError("incompatible robot filter contract")
+                arms = set(latest["arm_joint_names"])
+                homing = self.retargeter.status == "homing"
+                speeds = {
+                    n: (
+                        min(latest["arm_velocity_limit"], latest["return_velocity_limit"])
+                        if homing
+                        else latest["arm_velocity_limit"]
+                    )
+                    if n in arms
+                    else (0.0 if homing else latest["hand_velocity_limit"])
+                    for n in proposal
+                }
+                proposal = filter_targets(
+                    desired_positions,
+                    latest["last_commanded_positions"],
+                    latest["position_limits"],
+                    speeds,
+                    latest["control_dt"],
+                    latest["ema_alpha"],
+                )
+                if latest.get("hand_command_mode") == "direct" and not homing:
+                    for n in proposal:
+                        if n not in arms:
+                            proposal[n] = desired_positions[n]
+                r = self.retargeter
+                saved = r.robot.state.q.copy()
+                try:
+                    for n, v in latest["positions"].items():
+                        r.robot.set_joint(n, v)
+                    measured = r.robot.state.q.copy()
+                    previous = measured.copy()
+                    candidate = measured.copy()
+                    for n in proposal:
+                        offset = r.robot.get_joint_offset(n)
+                        previous[offset] = latest["last_commanded_positions"][n]
+                        candidate[offset] = proposal[n]
+                    r._project_hands(previous)
+                    r._project_hands(candidate)
+                    r._validate_motion(measured, previous, candidate)
+                    r._pending_positions = proposal.copy()
+                finally:
+                    r.robot.state.q = saved
             self.status = self.retargeter.status
             self.hold_reason = self.retargeter.hold_reason
             self._record_timing("retarget", 1000 * (time.monotonic() - retarget_started))
@@ -479,6 +528,8 @@ class RoboJuDoBridge:
                 "intent": latest["intent"],
                 "status": self.status,
                 "positions": proposal,
+                "desired_positions": desired_positions,
+                "filter_contract": "robojudo_filter_v1",
                 "hand_command_mode": latest.get("hand_command_mode", "velocity_limited"),
             }
             if visualize:
