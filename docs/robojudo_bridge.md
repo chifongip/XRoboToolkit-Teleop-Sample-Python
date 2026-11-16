@@ -150,6 +150,18 @@ is unchanged. Matching arms and both hands still advance as a combined frame. Wi
 `Completion p95 (ms)` also reports SDK read durations, receipt-to-hand-write completion delays, arm submission duration,
 and submission-start skew across the three components. These are software timings, not physical target attainment.
 
+Updated robot feedback freezes `first_feedback_built` at the first successful local enqueue of the acknowledgement.
+`robot_ack_wait` and `robot_total` use that timestamp rather than a later snapshot of the same completed command;
+`feedback_snapshot_lag` exposes the difference. Older robots retain the previous timing calculation. Enqueue success
+does not guarantee subscriber delivery. `worker_to_parent` and `parent_to_ack` split completion observation, and
+`Completion observations` counts idle versus periodic pipeline acknowledgements. These optional diagnostics do not
+change the proposal schema or the combined arm/finger completion barrier.
+
+On the Jetson, the robot's opt-in `x2_xrobotoolkit_omnihand_real_direct_low_latency` configuration enables direct SDK
+worker readiness hints after successful shared-state publication. The bridge invocation and publishing frequency
+remain unchanged; normal robot configurations retain supervisor notifications and periodic checks.
+
+
 
 To measure SDK updates without IK or ZMQ, stop the bridge and other SDK clients,
 leave PC Service/headset streaming, and run:

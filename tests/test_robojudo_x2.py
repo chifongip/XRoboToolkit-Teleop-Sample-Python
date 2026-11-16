@@ -753,6 +753,47 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(self.bridge.poll())
             self.assertEqual(self.bridge._completion_count, 1)
 
+    def test_first_feedback_metadata_separates_publication_from_later_snapshot(self):
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            state = copy.deepcopy(self.state)
+            state.update(
+                state_id=state["state_id"] + 1,
+                command_id=state["command_id"] + 1,
+                applied_bridge_id=self.bridge.bridge_id,
+                applied_frame_id=1,
+            )
+            state["feedback_diagnostics"] = {
+                "completion_observation_source": "idle",
+                "command_timestamps": {
+                    "received": 10.0,
+                    "worker_completion_ready": 10.004,
+                    "parent_snapshot_received": 10.005,
+                    "acknowledged": 10.006,
+                    "first_feedback_built": 10.007,
+                    "feedback_built": 10.02,
+                },
+            }
+            clock.return_value = 100.04
+            self.bridge.feedback.messages.append(state)
+            self.assertTrue(self.bridge.receive_feedback())
+            for label, expected in {
+                "robot_ack_wait": 1,
+                "robot_total": 7,
+                "feedback_snapshot_lag": 13,
+                "worker_to_parent": 1,
+                "parent_to_ack": 1,
+                "transport_and_poll": 33,
+            }.items():
+                self.assertAlmostEqual(self.bridge._timing_ms[label], expected)
+            self.assertEqual(self.bridge._completion_sources, {"idle": 1})
+            clock.return_value = self.bridge._xr_report_at + 2.1
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+            self.assertTrue(any("Completion observations: idle=1, periodic=0" in entry for entry in logs.output))
+            self.assertEqual(self.bridge._completion_sources, {})
+
     def test_roundtrip_diagnostics_include_pipeline_compute_and_ack_delays(self):
         self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
         with patch("time.monotonic", return_value=100.0) as clock:

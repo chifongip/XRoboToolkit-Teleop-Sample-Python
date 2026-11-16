@@ -94,6 +94,7 @@ class RoboJuDoBridge:
         self._timing_ms = {}
         self._timing_samples = {}
         self._feedback_details = {}
+        self._completion_sources = {}
         self._proposal_count = self._completion_count = 0
 
     def _record_timing(self, name, value):
@@ -133,13 +134,23 @@ class RoboJuDoBridge:
             # Compare durations only: bridge and robot may run on different hosts.
             diagnostics = state.get("feedback_diagnostics", {})
             stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
+            if isinstance(diagnostics, dict):
+                source = diagnostics.get("completion_observation_source")
+                if source in ("idle", "periodic"):
+                    self._completion_sources[source] = self._completion_sources.get(source, 0) + 1
             if isinstance(stamps, dict):
+                # Older robots lack first-publication metadata.
+                publication = "first_feedback_built" if "first_feedback_built" in stamps else "feedback_built"
                 intervals = {
                     "robot_admission": ("received", "hand_submitted"),
-                    "robot_ack_wait": ("acknowledged", "feedback_built"),
-                    "robot_total": ("received", "feedback_built"),
+                    "robot_ack_wait": ("acknowledged", publication),
+                    "robot_total": ("received", publication),
+                    "worker_to_parent": ("worker_completion_ready", "parent_snapshot_received"),
+                    "parent_to_ack": ("parent_snapshot_received", "acknowledged"),
                     "arm_submission": ("arm_submission_started", "arm_submission_completed"),
                 }
+                if publication == "first_feedback_built":
+                    intervals["feedback_snapshot_lag"] = (publication, "feedback_built")
                 for side in ("left", "right"):
                     intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
                     intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
@@ -373,7 +384,10 @@ class RoboJuDoBridge:
             "arm_submission",
             "submission_skew",
             "completion_observation",
+            "worker_to_parent",
+            "parent_to_ack",
             "robot_ack_wait",
+            "feedback_snapshot_lag",
             "robot_total",
             "transport_and_poll",
         )
@@ -384,6 +398,12 @@ class RoboJuDoBridge:
         ]
         if breakdown:
             logger.info("Completion p95 (ms): %s", ", ".join(breakdown))
+        if self._completion_sources:
+            logger.info(
+                "Completion observations: idle=%d, periodic=%d",
+                self._completion_sources.get("idle", 0),
+                self._completion_sources.get("periodic", 0),
+            )
         if self._timing_samples.get("ik_calls"):
             calls = sum(self._timing_samples["ik_calls"])
             tracked = sum(self._timing_samples.get("ik_tracked_calls", ()))
@@ -397,6 +417,7 @@ class RoboJuDoBridge:
                 f"; iterations per step p95={np.percentile(iterations, 95):.1f}" if iterations else "",
             )
         self._timing_samples.clear()
+        self._completion_sources.clear()
         self._proposal_count = self._completion_count = 0
         self._xr_updates = 0
         self._xr_report_at = now
