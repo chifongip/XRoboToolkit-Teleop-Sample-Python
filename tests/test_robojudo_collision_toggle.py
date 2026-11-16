@@ -66,6 +66,7 @@ class CollisionToggleTests(unittest.TestCase):
             return True
 
         bridge.poll.side_effect = poll
+        bridge.wait_until_publish.side_effect = lambda deadline: sleep(max(0, deadline - now))
         with (
             patch("xrobotoolkit_teleop.integrations.robojudo.RoboJuDoBridge", return_value=bridge),
             patch("time.monotonic", side_effect=lambda: now),

@@ -615,6 +615,44 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("grips=0.95/0.00", logs.output[0])
         self.assertNotIn("timestamp=", logs.output[0])
 
+    def test_feedback_between_publish_ticks_observes_completion_without_computing(self):
+        self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+        self.assertTrue(self.bridge.poll())
+        state = copy.deepcopy(self.state)
+        state.update(
+            state_id=state["state_id"] + 1,
+            command_id=state["command_id"] + 1,
+            applied_bridge_id=self.bridge.bridge_id,
+            applied_frame_id=1,
+        )
+        self.bridge.feedback.messages.append(state)
+        frames = len(self.bridge.commands.frames)
+        with patch.object(self.bridge.retargeter, "step") as compute:
+            self.assertTrue(self.bridge.receive_feedback())
+            compute.assert_not_called()
+        self.assertEqual(self.bridge._completion_count, 1)
+        self.assertEqual(len(self.bridge.commands.frames), frames)
+        self.assertTrue(self.bridge.poll())
+        self.assertEqual(self.bridge.commands.frames[-1]["command_id"], state["command_id"])
+
+    def test_wait_services_feedback_but_does_not_publish_before_deadline(self):
+        clock = [100.0]
+        self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+
+        def wait(**kwargs):
+            clock[0] += 0.01
+            return int(clock[0] < 100.02)
+
+        with (
+            patch("time.monotonic", side_effect=lambda: clock[0]),
+            patch.object(self.bridge.feedback, "poll", side_effect=wait, create=True),
+            patch.object(self.bridge.retargeter, "step") as compute,
+        ):
+            self.bridge.wait_until_publish(100.02)
+            compute.assert_not_called()
+        self.assertEqual(self.bridge.commands.frames, [])
+        self.assertGreaterEqual(clock[0], 100.02)
+
     def test_acknowledgement_timing_is_shown_when_commands_complete(self):
         self.bridge._record_timing("completion_latency", 25.0)
         self.bridge._record_timing("left_hand_queue", 12.0)
@@ -674,6 +712,10 @@ class BridgeTests(unittest.TestCase):
                 "command_timestamps": {
                     "received": 10.0,
                     "hand_submitted": 10.01,
+                    "arm_submission_started": 10.012,
+                    "arm_submission_completed": 10.015,
+                    "left_read_started": 9.98,
+                    "left_read_completed": 9.99,
                     "left_submitted": 10.011,
                     "left_write_started": 10.03,
                     "left_write_completed": 10.04,
@@ -691,6 +733,11 @@ class BridgeTests(unittest.TestCase):
             self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 110.0)
             for label, expected in {
                 "robot_admission": 10,
+                "arm_submission": 3,
+                "submission_skew": 23,
+                "left_hand_read": 10,
+                "left_receipt_to_write": 40,
+                "right_receipt_to_write": 50,
                 "left_hand_queue": 19,
                 "right_hand_write": 15,
                 "completion_observation": 10,

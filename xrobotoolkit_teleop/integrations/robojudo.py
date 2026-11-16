@@ -138,10 +138,13 @@ class RoboJuDoBridge:
                     "robot_admission": ("received", "hand_submitted"),
                     "robot_ack_wait": ("acknowledged", "feedback_built"),
                     "robot_total": ("received", "feedback_built"),
+                    "arm_submission": ("arm_submission_started", "arm_submission_completed"),
                 }
                 for side in ("left", "right"):
                     intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
                     intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
+                    intervals[f"{side}_hand_read"] = (f"{side}_read_started", f"{side}_read_completed")
+                    intervals[f"{side}_receipt_to_write"] = ("received", f"{side}_write_completed")
                 for label, (start, end) in intervals.items():
                     try:
                         duration = 1000 * (_number(stamps[end]) - _number(stamps[start]))
@@ -153,6 +156,15 @@ class RoboJuDoBridge:
                             residual = 1000 * (now - sent_at) - duration
                             if residual >= 0:
                                 self._record_timing("transport_and_poll", residual)
+                try:
+                    starts = [
+                        _number(stamps[name])
+                        for name in ("arm_submission_started", "left_write_started", "right_write_started")
+                    ]
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    pass
+                else:
+                    self._record_timing("submission_skew", 1000 * (max(starts) - min(starts)))
                 try:
                     completed = max(_number(stamps[f"{side}_write_completed"]) for side in ("left", "right"))
                     delay = 1000 * (_number(stamps["acknowledged"]) - completed)
@@ -354,6 +366,12 @@ class RoboJuDoBridge:
             "left_hand_write",
             "right_hand_queue",
             "right_hand_write",
+            "left_hand_read",
+            "right_hand_read",
+            "left_receipt_to_write",
+            "right_receipt_to_write",
+            "arm_submission",
+            "submission_skew",
             "completion_observation",
             "robot_ack_wait",
             "robot_total",
@@ -384,7 +402,21 @@ class RoboJuDoBridge:
         self._xr_report_at = now
 
     def poll(self):
-        """Bound receive/compute work to the newest validated robot snapshot."""
+        """Publish at most one proposal using the newest validated feedback."""
+        latest = self.receive_feedback()
+        return self._publish_proposal(latest) if latest else False
+
+    def wait_until_publish(self, deadline):
+        """Observe completion between publishing ticks without running IK."""
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self.feedback.poll(timeout=max(1, int(remaining * 1000)), flags=zmq.POLLIN):
+                self.receive_feedback()
+
+    def receive_feedback(self):
+        """Bound receive/bookkeeping work without sampling XR or issuing commands."""
         latest = None
         invalid_feedback = False
         for _ in range(32):
@@ -485,9 +517,12 @@ class RoboJuDoBridge:
                     continue
                 if value >= 0:
                     self._record_timing(name, value)
-        baseline = (*key, latest["command_id"])
         self._expire_outstanding(now)
         self._observe_completion(latest, now)
+        return latest
+
+    def _publish_proposal(self, latest):
+        baseline = (latest["session_id"], latest["generation"], latest["command_id"])
         try:
             retarget_started = time.monotonic()
             frame = self._xr_frame() if latest["intent"] == "TRACK" else None
@@ -696,7 +731,7 @@ def main(
         period = 1 / control_frequency
         deadline = time.monotonic()
         while True:
-            time.sleep(max(0, deadline - time.monotonic()))
+            bridge.wait_until_publish(deadline)
             bridge.poll()
             if xr_diagnostics:
                 bridge.report_xr_diagnostics()

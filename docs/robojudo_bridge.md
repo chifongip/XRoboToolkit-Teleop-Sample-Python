@@ -144,6 +144,13 @@ proposal reported applied by the robot; publishing or discarding proposals canno
 advance solver history. Completion latency starts after publication and includes
 robot application and acknowledgement delays, so faster IK alone cannot remove it.
 
+Feedback is now processed between publishing deadlines using socket readiness. Receiving feedback updates completion
+bookkeeping immediately but does not run XR sampling/IK or send additional proposals; the configured publishing rate
+is unchanged. Matching arms and both hands still advance as a combined frame. With updated robot feedback,
+`Completion p95 (ms)` also reports SDK read durations, receipt-to-hand-write completion delays, arm submission duration,
+and submission-start skew across the three components. These are software timings, not physical target attainment.
+
+
 To measure SDK updates without IK or ZMQ, stop the bridge and other SDK clients,
 leave PC Service/headset streaming, and run:
 
