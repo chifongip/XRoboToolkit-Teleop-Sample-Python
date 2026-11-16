@@ -794,6 +794,33 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(any("Completion observations: idle=1, periodic=0" in entry for entry in logs.output))
             self.assertEqual(self.bridge._completion_sources, {})
 
+    def test_checkpoint_costs_and_service_sources_are_reported(self):
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.state["pipeline_timing_ms"] = {"checkpoint_before": 0.2, "checkpoint_after": 0.4}
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            for index, source in enumerate(("before_policy", "after_policy"), start=1):
+                state = copy.deepcopy(self.state)
+                state.update(
+                    state_id=state["state_id"] + index,
+                    command_id=state["command_id"] + index,
+                    applied_bridge_id=self.bridge.bridge_id,
+                    applied_frame_id=index,
+                )
+                state["last_commanded_positions"] = self.bridge.commands.frames[-1]["positions"]
+                state["feedback_diagnostics"] = {"completion_observation_source": source}
+                self.bridge.feedback.messages.append(state)
+                self.assertTrue(self.bridge.poll())
+            self.assertEqual(self.bridge._completion_sources, {"before_policy": 1, "after_policy": 1})
+            self.assertEqual(self.bridge._timing_ms["checkpoint_before"], 0.2)
+            self.assertEqual(self.bridge._timing_ms["checkpoint_after"], 0.4)
+            clock.return_value = self.bridge._xr_report_at + 2.1
+            with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
+                self.bridge.report_xr_diagnostics()
+            self.assertTrue(any("checkpoint_before=0.2, checkpoint_after=0.4" in entry for entry in logs.output))
+            self.assertTrue(any("before_policy=1, after_policy=1" in entry for entry in logs.output))
+            self.assertEqual(self.bridge._completion_sources, {})
+
     def test_roundtrip_diagnostics_include_pipeline_compute_and_ack_delays(self):
         self.state["pipeline_timing_ms"] = {"policy": 55.0, "env_step": 4.0}
         with patch("time.monotonic", return_value=100.0) as clock:

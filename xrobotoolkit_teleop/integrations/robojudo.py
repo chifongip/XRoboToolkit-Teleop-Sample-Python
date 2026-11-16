@@ -136,7 +136,7 @@ class RoboJuDoBridge:
             stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
             if isinstance(diagnostics, dict):
                 source = diagnostics.get("completion_observation_source")
-                if source in ("idle", "periodic"):
+                if source in ("idle", "periodic", "before_policy", "after_policy"):
                     self._completion_sources[source] = self._completion_sources.get(source, 0) + 1
             if isinstance(stamps, dict):
                 # Older robots lack first-publication metadata.
@@ -361,6 +361,8 @@ class RoboJuDoBridge:
         for label, name in (
             ("policy", "policy"),
             ("env_step", "env_step"),
+            ("checkpoint_before", "checkpoint_before"),
+            ("checkpoint_after", "checkpoint_after"),
             ("retarget", "retarget"),
             ("xr_sample", "xr_sample"),
             ("ik", "ik"),
@@ -400,9 +402,11 @@ class RoboJuDoBridge:
             logger.info("Completion p95 (ms): %s", ", ".join(breakdown))
         if self._completion_sources:
             logger.info(
-                "Completion observations: idle=%d, periodic=%d",
+                "Completion observations: idle=%d, periodic=%d, before_policy=%d, after_policy=%d",
                 self._completion_sources.get("idle", 0),
                 self._completion_sources.get("periodic", 0),
+                self._completion_sources.get("before_policy", 0),
+                self._completion_sources.get("after_policy", 0),
             )
         if self._timing_samples.get("ik_calls"):
             calls = sum(self._timing_samples["ik_calls"])
@@ -529,7 +533,15 @@ class RoboJuDoBridge:
             if value >= 0:
                 self._record_timing(name, value)
         pipeline_timing = latest.get("pipeline_timing_ms", {})
-        for name in ("policy", "env_step", "body_snapshot", "hand_snapshot", "feedback_assembly"):
+        for name in (
+            "policy",
+            "env_step",
+            "checkpoint_before",
+            "checkpoint_after",
+            "body_snapshot",
+            "hand_snapshot",
+            "feedback_assembly",
+        ):
             self._timing_ms.pop(name, None)
             if isinstance(pipeline_timing, dict):
                 try:

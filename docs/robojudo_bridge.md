@@ -154,12 +154,17 @@ Updated robot feedback freezes `first_feedback_built` at the first successful lo
 `robot_ack_wait` and `robot_total` use that timestamp rather than a later snapshot of the same completed command;
 `feedback_snapshot_lag` exposes the difference. Older robots retain the previous timing calculation. Enqueue success
 does not guarantee subscriber delivery. `worker_to_parent` and `parent_to_ack` split completion observation, and
-`Completion observations` counts idle versus periodic pipeline acknowledgements. These optional diagnostics do not
+`Completion observations` counts idle, periodic, before-policy and after-policy acknowledgements. These optional diagnostics do not
 change the proposal schema or the combined arm/finger completion barrier.
 
 On the Jetson, the robot's opt-in `x2_xrobotoolkit_omnihand_real_direct_low_latency` configuration enables direct SDK
 worker readiness hints after successful shared-state publication. The bridge invocation and publishing frequency
 remain unchanged; normal robot configurations retain supervisor notifications and periodic checks.
+The same low-latency robot configuration now also checks completed frames immediately before and after policy
+inference, using the existing acknowledgement routine. No additional opt-in is required. `checkpoint_before` and
+`checkpoint_after` processing timings show the added service cost separately from `policy`. These checkpoints do
+not trigger extra bridge publications, IK computations, or hardware submissions.
+
 
 
 
