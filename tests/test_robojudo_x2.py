@@ -617,12 +617,14 @@ class BridgeTests(unittest.TestCase):
 
     def test_acknowledgement_timing_is_shown_when_commands_complete(self):
         self.bridge._record_timing("completion_latency", 25.0)
+        self.bridge._record_timing("left_hand_queue", 12.0)
         self.bridge._proposal_count = self.bridge._completion_count = 1
         with patch("time.monotonic", return_value=self.bridge._xr_report_at + 2.1):
             with self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs:
                 self.bridge.report_xr_diagnostics()
         self.assertIn("sent=1, completed=1", logs.output[1])
         self.assertIn("Processing p95 (ms): completion_latency=25.0", logs.output[2])
+        self.assertIn("Completion p95 (ms): left_hand_queue=12.0", logs.output[3])
 
     def test_diagnostics_separate_sampling_solving_and_warm_start_counts(self):
         for name, value in (
@@ -667,11 +669,36 @@ class BridgeTests(unittest.TestCase):
             self.state["command_id"] += 1
             self.state["applied_bridge_id"] = self.bridge.bridge_id
             self.state["applied_frame_id"] = 1
+            # Robot clock deliberately differs from bridge clock by 90 seconds.
+            self.state["feedback_diagnostics"] = {
+                "command_timestamps": {
+                    "received": 10.0,
+                    "hand_submitted": 10.01,
+                    "left_submitted": 10.011,
+                    "left_write_started": 10.03,
+                    "left_write_completed": 10.04,
+                    "right_submitted": 10.011,
+                    "right_write_started": 10.035,
+                    "right_write_completed": 10.05,
+                    "acknowledged": 10.06,
+                    "feedback_built": 10.08,
+                }
+            }
             self.bridge.feedback.messages.append(self.state)
             with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
                 self.assertTrue(self.bridge.poll())
                 commit.assert_not_called()
             self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 110.0)
+            for label, expected in {
+                "robot_admission": 10,
+                "left_hand_queue": 19,
+                "right_hand_write": 15,
+                "completion_observation": 10,
+                "robot_ack_wait": 20,
+                "robot_total": 80,
+                "transport_and_poll": 30,
+            }.items():
+                self.assertAlmostEqual(self.bridge._timing_ms[label], expected)
             self.assertEqual(self.bridge._completion_count, 1)
             self.assertNotIn(1, self.bridge._outstanding)
             self.assertNotIn(1, self.bridge._completion_records)

@@ -130,6 +130,38 @@ class RoboJuDoBridge:
             # Observe hardware completion even if its solver transaction expired.
             self._record_timing("completion_latency", 1000 * (now - sent_at))
             self._completion_count += 1
+            # Compare durations only: bridge and robot may run on different hosts.
+            diagnostics = state.get("feedback_diagnostics", {})
+            stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
+            if isinstance(stamps, dict):
+                intervals = {
+                    "robot_admission": ("received", "hand_submitted"),
+                    "robot_ack_wait": ("acknowledged", "feedback_built"),
+                    "robot_total": ("received", "feedback_built"),
+                }
+                for side in ("left", "right"):
+                    intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
+                    intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
+                for label, (start, end) in intervals.items():
+                    try:
+                        duration = 1000 * (_number(stamps[end]) - _number(stamps[start]))
+                    except (KeyError, TypeError, ValueError, OverflowError):
+                        continue
+                    if duration >= 0:
+                        self._record_timing(label, duration)
+                        if label == "robot_total":
+                            residual = 1000 * (now - sent_at) - duration
+                            if residual >= 0:
+                                self._record_timing("transport_and_poll", residual)
+                try:
+                    completed = max(_number(stamps[f"{side}_write_completed"]) for side in ("left", "right"))
+                    delay = 1000 * (_number(stamps["acknowledged"]) - completed)
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    pass
+                else:
+                    if delay >= 0:
+                        self._record_timing("completion_observation", delay)
+
         try:
             if transaction_record is not None:
                 transaction = transaction_record[1]
@@ -316,6 +348,24 @@ class RoboJuDoBridge:
                 stages.append(f"{label}={np.percentile(values, 95):.1f}")
         if stages:
             logger.info("Processing p95 (ms): %s", ", ".join(stages))
+        completion_stages = (
+            "robot_admission",
+            "left_hand_queue",
+            "left_hand_write",
+            "right_hand_queue",
+            "right_hand_write",
+            "completion_observation",
+            "robot_ack_wait",
+            "robot_total",
+            "transport_and_poll",
+        )
+        breakdown = [
+            f"{name}={np.percentile(self._timing_samples[name], 95):.1f}"
+            for name in completion_stages
+            if self._timing_samples.get(name)
+        ]
+        if breakdown:
+            logger.info("Completion p95 (ms): %s", ", ".join(breakdown))
         if self._timing_samples.get("ik_calls"):
             calls = sum(self._timing_samples["ik_calls"])
             tracked = sum(self._timing_samples.get("ik_tracked_calls", ()))
