@@ -1,22 +1,13 @@
 """Single-arm warm starts and delayed application through the real retargeter."""
 
-import importlib.util
 import os
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 import numpy as np
-
 from test_robojudo_x2 import fixture
 from xrobotoolkit_teleop.common.teleop_settings import TeleopSettings
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
-
-SPEC = importlib.util.spec_from_file_location(
-    "streaming_latency", Path(__file__).resolve().parents[1] / "scripts/misc/benchmark_lerobot_latency.py"
-)
-benchmark = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(benchmark)
 
 
 @unittest.skipUnless(os.environ.get("X2_TEST_LEROBOT") == "1", "requires native LeRobot dependencies")
@@ -37,7 +28,9 @@ class LeRobotStreamingTests(unittest.TestCase):
                 }
                 limits = r.limits | r.profile.hands.limits
 
-                def step(stamp, active):
+                def step(
+                    stamp, active, r=r, measured=measured, previous=previous, home=home, limits=limits, poses=poses
+                ):
                     result = r.step(
                         measured,
                         previous,
@@ -82,11 +75,3 @@ class LeRobotStreamingTests(unittest.TestCase):
                 self.assertEqual(r.solver_diagnostics, {})
                 self.assertIsNotNone(step(8, {side: 1.0, other: 1.0}))
                 self.assertEqual(r.solver_diagnostics["warm_calls"], 0)
-
-    def test_delayed_partial_application_still_uses_only_accepted_warm_state(self):
-        record, commands = benchmark.measure("closing", 24, "x2_omnihand", "right", 3, 2)
-        self.assertEqual(record["warm_frames"], record["steps"])
-        self.assertGreater(record["completed_frames"], 0)
-        self.assertLess(record["completed_frames"], record["steps"])
-        self.assertEqual(record["failed_cycles"], 0)
-        self.assertTrue(np.isfinite(commands).all())

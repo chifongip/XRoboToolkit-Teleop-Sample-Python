@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import tyro
-from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
 from xrobotoolkit_teleop.ik import BackendName
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import (
     AgibotX2TeleopController,

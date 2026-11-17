@@ -34,7 +34,7 @@ class ExecutorModel(TransitionValidation):
         self.profile = profile
         self.settings = settings
         self.fingerprint = model_fingerprint(profile)
-        self.hand_names = list(profile.hands.active)
+        self.hand_names = [] if profile.hands is None else list(profile.hands.active)
         self.collision_margin = settings.collision_margin
         self.robot = None
         self.collision_checker = None
@@ -45,7 +45,7 @@ class ExecutorModel(TransitionValidation):
             self.robot = PinocchioModel(profile.spec)
             self.hand_couplings = [
                 (self.robot.get_joint_offset(a), self.robot.get_joint_offset(b), np.array(c))
-                for a, b, c in profile.hands.couplings
+                for a, b, c in (() if profile.hands is None else profile.hands.couplings)
             ]
             self.collision_checker = CollisionChecker(self.robot)
 

@@ -26,8 +26,7 @@ python -m pip install -e ".[x2]"
 Install and start [XRoboToolkit PC Service](https://github.com/XR-Robotics/XRoboToolkit-PC-Service)
 separately before using the headset. RoboJuDo-Plus provides its own installer
 for a Python 3.11 XR environment with both IK backends; follow the bridge guide.
-The bridge guide also covers runtime diagnostics, architecture, and collision
-benchmarks. See the [X2 asset reference](assets/agibot/x2/README.md) for model
+The bridge guide covers simulation, hardware preparation, controls, and interruption behavior. See the [X2 asset reference](assets/agibot/x2/README.md) for model
 provenance and licensing.
 
 ### Full installation and hardware setup
