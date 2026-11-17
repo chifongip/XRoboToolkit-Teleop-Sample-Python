@@ -108,6 +108,23 @@ class ArmBridgeTests(unittest.TestCase):
         self.assertEqual(self.bridge.status, "hold")
         self.assertIsNone(self.bridge._latest)
 
+    def test_first_completion_feedback_is_observed_once_without_publishing(self):
+        self.assertTrue(self.send())
+        self.bridge._command_log.sent("robot", 1, 123, 100.0)
+        self.state.update(state_id=2, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=123, command_id=1)
+        self.clock.return_value = 100.03
+        self.assertTrue(self.send())
+        self.clock.return_value = 100.06
+        self.assertTrue(self.send())
+        self.assertEqual(self.bridge._command_log.completed_count, 1)
+        self.assertAlmostEqual(self.bridge._command_log.total_ms, 30.0)
+        self.assertEqual(self.bridge.commands.frames, [])
+        self.bridge._command_log.sent("robot", 1, 124, 100.06)
+        self.state.update(generation=2, state_id=3, applied_frame_id=124)
+        self.assertTrue(self.send())
+        self.assertEqual(len(self.bridge._command_log.pending), 0)
+        self.assertEqual(self.bridge._command_log.completed_count, 1)
+
     def test_policy_is_adopted_and_cannot_change_within_a_session(self):
         self.state["executor"]["collision_checking"] = True
         self.assertTrue(self.send())

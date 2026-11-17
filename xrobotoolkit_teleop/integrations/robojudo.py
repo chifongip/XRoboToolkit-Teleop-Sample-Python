@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from contextlib import ExitStack
 from dataclasses import replace
 from numbers import Real
@@ -33,6 +34,53 @@ def _number(value):
     if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value):
         raise ValueError("expected a finite number")
     return float(value)
+
+
+class _CommandLog:
+    """Bounded command correlation using only the bridge's monotonic clock."""
+
+    def __init__(self, bridge_id):
+        self.bridge_id = bridge_id
+        self.pending = OrderedDict()
+        self.started = time.monotonic()
+        self.sent_count = self.completed_count = 0
+        self.total_ms = self.max_ms = 0.0
+
+    def sent(self, session, generation, frame_id, sent_at):
+        self.sent_count += 1
+        self.pending[session, generation, frame_id] = sent_at
+        while len(self.pending) > 512:
+            self.pending.popitem(last=False)
+
+    def completed(self, state, received_at):
+        frame_id = state.get("applied_frame_id")
+        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
+            return
+        sent_at = self.pending.pop((state["session_id"], state["generation"], frame_id), None)
+        if sent_at is None:
+            return
+        while self.pending and next(iter(self.pending))[2] < frame_id:
+            self.pending.popitem(last=False)
+        latency_ms = 1000 * (received_at - sent_at)
+        if latency_ms >= 0:
+            self.completed_count += 1
+            self.total_ms += latency_ms
+            self.max_ms = max(self.max_ms, latency_ms)
+
+    def report(self, status):
+        now = time.monotonic()
+        elapsed = now - self.started
+        if elapsed < 1.0:
+            return
+        rtt = (
+            f"{self.total_ms / self.completed_count:.1f} ms avg / {self.max_ms:.1f} ms max"
+            if self.completed_count
+            else "n/a"
+        )
+        logger.info("XR: send=%.1f Hz | completion RTT=%s | %s", self.sent_count / elapsed, rtt, status)
+        self.started = now
+        self.sent_count = self.completed_count = 0
+        self.total_ms = self.max_ms = 0.0
 
 
 class RoboJuDoBridge:
@@ -96,6 +144,7 @@ class RoboJuDoBridge:
         except Exception:
             self.close()
             raise
+        self._command_log = _CommandLog(self.bridge_id)
 
     def close(self):
         self._resources.close()
@@ -216,8 +265,11 @@ class RoboJuDoBridge:
         return frame
 
     def poll(self):
-        latest = self.receive_feedback()
-        return self._publish_desired(latest) if latest else False
+        try:
+            latest = self.receive_feedback()
+            return self._publish_desired(latest) if latest else False
+        finally:
+            self._command_log.report(self.status)
 
     def wait_until_publish(self, deadline):
         """Drain feedback between ticks without sampling XR or running IK."""
@@ -246,6 +298,10 @@ class RoboJuDoBridge:
                     raise ValueError("feedback exceeds size limit")
                 state = json.loads(payload, object_pairs_hook=_unique_object)
                 self.validate_feedback(state)
+                if (state["session_id"], state["generation"]) != self._key:
+                    self._command_log.pending.clear()
+                else:
+                    self._command_log.completed(state, packet_at)
                 latest, received_at = state, packet_at
             except (TypeError, ValueError, RecursionError, OverflowError) as exc:
                 latest = None
@@ -339,9 +395,11 @@ class RoboJuDoBridge:
             }
             if visualize:
                 message["target_poses"] = self.retargeter.target_poses
+            sent_at = time.monotonic()
             self.commands.send_json(message, flags=zmq.NOBLOCK, allow_nan=False)
             if desired is None:
                 return False
+            self._command_log.sent(latest["session_id"], latest["generation"], self._frame_id, sent_at)
             if not self.retargeter.acknowledge(desired):
                 return self._hold("desired IK history could not be committed")
             return True
