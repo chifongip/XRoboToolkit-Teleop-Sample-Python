@@ -23,6 +23,9 @@ from this repository's root:
 python -m pip install -e ".[x2]"
 ```
 
+Use `.[executor]` for the numeric Pinocchio/Coal executor without SDK/IK dependencies.
+The `teleop` extra supplies Meshcat, Placo, and the XR SDK; `x2` and `all` include it.
+
 Install and start [XRoboToolkit PC Service](https://github.com/XR-Robotics/XRoboToolkit-PC-Service)
 separately before using the headset. RoboJuDo-Plus provides its own installer
 for a Python 3.11 XR environment with both IK backends; follow the bridge guide.

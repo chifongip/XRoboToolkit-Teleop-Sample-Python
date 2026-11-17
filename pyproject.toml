@@ -14,15 +14,14 @@ authors = [
 ]
 dependencies = [
     "numpy",
-    "meshcat",
-    "placo>=0.11.0",
-    "xrobotoolkit-sdk>=1.1.0",
 ]
 
 [project.optional-dependencies]
 executor = ["pin==4.1.0", "coal==3.0.3"]
+teleop = ["meshcat", "placo>=0.11.0", "xrobotoolkit-sdk>=1.1.0"]
 # Fixed-base X2 arms and optional simulated Omnihand Pro fingers.
 x2 = [
+    "xrobotoolkit_teleop[teleop]",
     "coal",
     "mujoco",
     "tyro",
@@ -30,6 +29,7 @@ x2 = [
 ]
 # The original complete dependency set for all robot examples.
 all = [
+    "xrobotoolkit_teleop[teleop]",
     "mujoco",
     "tyro",
     "pyzmq",
