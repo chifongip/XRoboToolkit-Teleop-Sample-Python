@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import numpy as np
 from test_robojudo_x2 import MemoryContext
-from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
 from xrobotoolkit_teleop.ik.backend import IKSolver, TransactionalBackend
 from xrobotoolkit_teleop.ik.placo_model import PlacoModel
 from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint, RobotSpec
@@ -83,7 +83,7 @@ class ProfileBridgeTests(unittest.TestCase):
             )
         self.addCleanup(self.bridge.close)
         self.state = dict(
-            schema_version=1,
+            schema_version=3,
             type="upper_body_state",
             session_id="fixture",
             generation=1,
@@ -100,9 +100,12 @@ class ProfileBridgeTests(unittest.TestCase):
             arm_velocity_limit=1.0,
             return_velocity_limit=0.5,
             feedback_timeout_s=0.1,
-            filter_contract="robojudo_filter_v1",
-            ema_alpha=0.0,
-            arm_joint_names=list(self.bridge.retargeter.arm_names),
+            executor={
+                **self.bridge._model_identity,
+                "collision_checking": False,
+                "collision_margin": 0.02,
+                "collision_trigger": 0.08,
+            },
         )
         self.frame = XRFrame(0, {"headset": [0, 0, 0, 0, 0, 0, 1], "wand": [0, 0, 0, 0, 0, 0, 1]}, {"reach": 0.0})
 
@@ -120,131 +123,48 @@ class ProfileBridgeTests(unittest.TestCase):
 
     def engage_and_propose(self):
         self.assertFalse(self.poll())
-        self.assertTrue(self.poll())  # released idle command in streaming mode
+        self.assertTrue(self.poll())
         self.frame.grips["reach"] = 1.0
-        self.assertTrue(self.poll())  # clutch anchor has no solver history
-        self.assertTrue(self.poll(ack=True))
-        self.assertIsNotNone(next(reversed(self.bridge._outstanding.values()))[1][0])
+        self.assertTrue(self.poll())
+        self.assertTrue(self.poll())
+
+    def test_custom_profile_commits_desired_history_without_robot_completion(self):
+        self.engage_and_propose()
+        before = self.solver.history
+        self.assertTrue(self.poll())
+        self.assertGreater(self.solver.history, before)
+        command = self.bridge.commands.frames[-1]
+        self.assertEqual(command["type"], "upper_body_desired")
+        self.assertEqual(command["active_joint_names"], ["axis"])
+        self.assertEqual(self.solver.applied, command["positions"])
+
+    def test_send_failure_does_not_commit_desired_history(self):
+        self.engage_and_propose()
+        with patch.object(self.bridge.commands, "send_json", side_effect=RuntimeError("send failed")):
+            self.assertFalse(self.poll())
         self.assertEqual(self.solver.history, 0)
+        self.assertEqual(self.bridge.status, "hold")
 
-    def test_different_joint_count_mapping_and_pending_history(self):
+    def test_solve_overrun_does_not_publish(self):
         self.engage_and_propose()
-        self.assertEqual(set(self.bridge.commands.frames[-1]["positions"]), {"axis"})
-        self.assertEqual(set(self.bridge.retargeter.target_poses), {"reach"})
-        self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.solver.history, 1)
-        self.assertEqual(self.solver.applied, self.state["last_commanded_positions"])
-        self.assertTrue(self.poll())  # unchanged baseline never blocks publishing
-        self.assertEqual(self.solver.history, 1)
+        count = len(self.bridge.commands.frames)
+        original = self.bridge.retargeter.step
+        with patch("time.monotonic", return_value=100.0) as clock:
 
-    def test_accept_failure_resets_history_without_stopping_publication(self):
-        self.engage_and_propose()
-        with patch.object(self.bridge.retargeter.backend, "accept", side_effect=RuntimeError("accept failed")):
-            self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.bridge.status, "tracking")
-        self.assertIsNone(self.bridge.retargeter._pending)
-        self.assertEqual(self.solver.history, 0)
+            def slow(*args, **kwargs):
+                result = original(*args, **kwargs)
+                clock.return_value += 0.2
+                return result
 
-    def test_backtracked_quantized_positions_are_committed_exactly(self):
-        self.engage_and_propose()
-        validate = self.bridge.retargeter._validate_motion
-        attempts = []
-
-        def reject_full(measured, previous, candidate):
-            attempts.append(candidate.copy())
-            if len(attempts) == 1:
-                raise RuntimeError("full step rejected")
-            validate(measured, previous, candidate)
-
-        with patch.object(self.bridge.retargeter, "_validate_motion", side_effect=reject_full):
-            self.assertTrue(self.poll(ack=True))
-        positions = self.bridge.commands.frames[-1]["positions"]
-        self.assertEqual(len(attempts), 3)  # Includes the final filtered-path check.
-        self.assertLess(positions["axis"] - self.state["last_commanded_positions"]["axis"], 0.001)
-        self.assertEqual(float(np.float32(positions["axis"])), positions["axis"])
-        self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.solver.applied, positions)
-
-    def test_expired_completion_history_is_discarded_without_stopping(self):
-        self.engage_and_propose()
-        self.state["feedback_timeout_s"] = 1.0
-        with patch("time.monotonic", return_value=next(reversed(self.bridge._outstanding.values()))[2] + 0.11):
-            self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.solver.history, 0)
-        self.assertIsNone(self.solver.applied)
-
-    def test_retargeter_rejecting_completion_does_not_stop_publishing(self):
-        self.engage_and_propose()
-        with patch.object(self.bridge.retargeter, "complete_proposal", return_value=False):
-            self.assertTrue(self.poll(ack=True))
-        self.assertEqual(self.bridge.status, "tracking")
-        self.assertIsNone(self.bridge.retargeter._pending)
-
-    def test_cleanup_runs_even_if_pending_rejection_fails(self):
-        self.engage_and_propose()
-        retargeter = self.bridge.retargeter
-        path = Path(retargeter.profile.spec.urdf_path)
-        with patch.object(retargeter.backend, "reject", side_effect=RuntimeError("reject failed")):
-            with self.assertRaisesRegex(RuntimeError, "reject failed"):
-                self.bridge.close()
-        self.assertFalse(path.exists())
-        self.assertIsNone(retargeter._pending)
-        retargeter.close()
+            with patch.object(self.bridge.retargeter, "step", side_effect=slow):
+                self.assertFalse(self.poll())
+        self.assertEqual(len(self.bridge.commands.frames), count)
 
     def test_acknowledgement_requires_an_open_pending_proposal(self):
         self.assertFalse(self.bridge.retargeter.acknowledge({"axis": 0.0}))
         self.bridge.close()
         with self.assertRaisesRegex(RuntimeError, "closed"):
             self.bridge.retargeter.acknowledge({"axis": 0.0})
-
-    def test_mismatched_acknowledgement_rejects_history(self):
-        self.engage_and_propose()
-        self.state["command_id"] += 1
-        self.assertTrue(self.poll())  # new clutch anchor, not a commit
-        self.assertEqual(self.solver.history, 0)
-        self.assertIsNone(self.solver.applied)
-
-    def test_generation_change_and_invalid_feedback_drop_pending(self):
-        self.engage_and_propose()
-        self.state["generation"] += 1
-        self.assertFalse(self.poll())
-        self.assertIsNone(self.bridge.retargeter._pending)
-        self.assertEqual(self.solver.history, 0)
-        self.state["positions"] = {"wrong": 0.0}
-        self.assertFalse(self.poll())
-        self.assertIsNone(self.solver.applied)
-
-    def test_send_failure_rolls_back_solver_and_holds(self):
-        self.engage_and_propose()
-        with patch.object(self.bridge.commands, "send_json", side_effect=RuntimeError("send failed")):
-            self.assertFalse(self.poll(ack=True))
-        self.assertEqual(self.bridge.status, "hold")
-        self.assertIsNone(self.bridge.retargeter._pending)
-        self.assertEqual(self.solver.history, 0)
-
-    def test_deadline_expiry_rejects_pending_and_reanchors(self):
-        self.engage_and_propose()
-        with patch("time.monotonic", return_value=next(reversed(self.bridge._outstanding.values()))[2] + 0.11):
-            self.assertTrue(self.poll())
-        self.assertEqual(self.solver.history, 0)
-        self.assertIsNone(self.solver.applied)
-
-    def test_overrun_does_not_commit_or_publish(self):
-        self.engage_and_propose()
-        original = self.bridge.retargeter.step
-        with patch("time.monotonic", return_value=100.0) as clock:
-
-            def slow(*args, **kwargs):
-                result = original(*args, **kwargs)
-                clock.return_value = 100.2
-                return result
-
-            count = len(self.bridge.commands.frames)
-            with patch.object(self.bridge.retargeter, "step", side_effect=slow):
-                self.assertFalse(self.poll(ack=True))
-        self.assertEqual(len(self.bridge.commands.frames), count)
-        self.assertIsNone(self.bridge.retargeter._pending)
-        self.assertEqual(self.solver.history, 0)
 
     def test_backend_failure_cleans_profile_before_any_socket_or_xr_use(self):
         paths = []
@@ -334,9 +254,9 @@ class ProfileBridgeTests(unittest.TestCase):
 class NativeLeRobotDeploymentTests(unittest.TestCase):
     def test_full_body_symbolic_fk_matches_observed_model(self):
         from test_robojudo_x2 import fixture
-        from xrobotoolkit_teleop.common.x2_arm_retargeter import X2ArmRetargeter
+        from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter
 
-        retargeter = X2ArmRetargeter(ik_backend="lerobot")
+        retargeter = ExternalStateRetargeter(ik_backend="lerobot")
         self.addCleanup(retargeter.close)
         measured, home = fixture(retargeter)
         measured.update(waist_yaw_joint=0.3, waist_pitch_joint=0.1)

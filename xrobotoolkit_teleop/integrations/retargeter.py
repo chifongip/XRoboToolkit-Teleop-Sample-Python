@@ -109,6 +109,14 @@ class ExternalStateRetargeter(TransitionValidation):
         """Compatibility alias; the returned object is a numeric model adapter."""
         return self.robot
 
+    def configure_collision_policy(self, settings):
+        """Adopt the validated robot-owned policy before accepting XR targets."""
+        checker = CollisionChecker(self.robot) if settings.collision_checking else None
+        self.reset()
+        self.settings = settings
+        self.collision_checker = checker
+        self.collision_margin = settings.collision_margin
+
     def close(self):
         if not self._closed:
             self._closed = True
@@ -138,28 +146,6 @@ class ExternalStateRetargeter(TransitionValidation):
         self._pending = None
         self._pending_positions = None
         return True
-
-    def detach_proposal(self):
-        """Transfer an uncommitted solver transaction to a streaming publisher."""
-        transaction = (self._pending, self._pending_positions)
-        self._pending = None
-        self._pending_positions = None
-        return transaction
-
-    def complete_proposal(self, transaction, positions):
-        """Commit only the transaction explicitly reported as applied by the robot."""
-        proposal, expected = transaction
-        if expected != positions:
-            self.discard_proposal(transaction)
-            return False
-        if proposal is not None:
-            self.backend.accept(proposal, {n: positions[n] for n in self.arm_names})
-        return True
-
-    def discard_proposal(self, transaction):
-        proposal, _ = transaction
-        if proposal is not None and not self._closed:
-            self.backend.reject(proposal)
 
     def _output(self, candidate):
         self._checked_configuration = candidate.copy()

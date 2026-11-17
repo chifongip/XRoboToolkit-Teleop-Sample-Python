@@ -4,20 +4,19 @@ import json
 import logging
 import time
 import uuid
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from contextlib import ExitStack
+from dataclasses import replace
 from numbers import Real
 
 import numpy as np
 import tyro
 import zmq
 
-from xrobotoolkit_teleop.common.latency_trace import LatencyTrace, command_stamps, identity
 from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings
 from xrobotoolkit_teleop.ik.registry import BackendName
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
 from xrobotoolkit_teleop.integrations.robot_profiles import PROFILES
-from xrobotoolkit_teleop.integrations.target_filter import filter_targets
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,56 @@ def _number(value):
     return float(value)
 
 
+class _CommandLog:
+    """Bounded command correlation using only the bridge's monotonic clock."""
+
+    def __init__(self, bridge_id):
+        self.bridge_id = bridge_id
+        self.pending = OrderedDict()
+        self.started = time.monotonic()
+        self.sent_count = self.completed_count = 0
+        self.total_ms = self.max_ms = 0.0
+
+    def sent(self, session, generation, frame_id, sent_at):
+        self.sent_count += 1
+        self.pending[session, generation, frame_id] = sent_at
+        while len(self.pending) > 512:
+            self.pending.popitem(last=False)
+
+    def completed(self, state, received_at):
+        frame_id = state.get("applied_frame_id")
+        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
+            return
+        sent_at = self.pending.pop((state["session_id"], state["generation"], frame_id), None)
+        if sent_at is None:
+            return
+        while self.pending and next(iter(self.pending))[2] < frame_id:
+            self.pending.popitem(last=False)
+        latency_ms = 1000 * (received_at - sent_at)
+        if latency_ms >= 0:
+            self.completed_count += 1
+            self.total_ms += latency_ms
+            self.max_ms = max(self.max_ms, latency_ms)
+
+    def report(self, status):
+        now = time.monotonic()
+        elapsed = now - self.started
+        if elapsed < 1.0:
+            return
+        rtt = (
+            f"{self.total_ms / self.completed_count:.1f} ms avg / {self.max_ms:.1f} ms max"
+            if self.completed_count
+            else "n/a"
+        )
+        logger.info("XR: send=%.1f Hz | completion RTT=%s | %s", self.sent_count / elapsed, rtt, status)
+        self.started = now
+        self.sent_count = self.completed_count = 0
+        self.total_ms = self.max_ms = 0.0
+
+
 class RoboJuDoBridge:
+    """Solve desired XR targets; RoboJuDo owns executable transitions and completion."""
+
     def __init__(
         self,
         command_endpoint="tcp://127.0.0.1:8559",
@@ -49,37 +97,37 @@ class RoboJuDoBridge:
         ik_backend="placo",
         profile=None,
         context=None,
-        authoritative_executor=False,
-        observe_all_completions=True,
-        latency_trace_path=None,
-        latency_trace_duration_s=30.0,
-        latency_trace_delay_s=0.0,
     ):
-        self.trace = LatencyTrace(latency_trace_path, latency_trace_duration_s, latency_trace_delay_s)
-        self.observe_all_completions = observe_all_completions
-        self._completion_seen = OrderedDict()
-        self.authoritative_executor = authoritative_executor
-        self.executor_contract = None
-        self.settings = settings
-        self.xr_client = xr_client
+        from xrobotoolkit_teleop.common.executor_model import CONTRACT, model_fingerprint
+
         self._resources = ExitStack()
+        self.xr_client = xr_client
+        self.robot_name = robot
+        self.settings = replace(settings, collision_checking=False)
+        self.executor_contract = None
+        self._policy_session = None
+        self.bridge_id = uuid.uuid4().hex
+        self._frame_id = 0
+        self._key = None
+        self._state_id = -1
+        self._latest = None
+        self._multipart = False
+        self._feedback_timeout = 0.1
+        self._last_warning = float("-inf")
+        self.status = "waiting for robot feedback"
+        self.hold_reason = "no fresh robot feedback received"
         if xr_client is not None:
             self._resources.callback(xr_client.close)
         try:
-            self.retargeter = ExternalStateRetargeter(settings, robot=robot, ik_backend=ik_backend, profile=profile)
+            self.retargeter = ExternalStateRetargeter(
+                self.settings, robot=robot, ik_backend=ik_backend, profile=profile
+            )
             self._resources.callback(self.retargeter.close)
-            if authoritative_executor:
-                if not self.retargeter.hand_names:
-                    raise ValueError("authoritative executor requires the combined OmniHand profile")
-                from xrobotoolkit_teleop.common.executor_model import CONTRACT, model_fingerprint
-
-                self.executor_contract = {
-                    "contract": CONTRACT,
-                    "model_fingerprint": model_fingerprint(self.retargeter.profile),
-                    "collision_checking": settings.collision_checking,
-                    "collision_margin": settings.collision_margin,
-                    "collision_trigger": settings.collision_trigger,
-                }
+            self._model_identity = {
+                "contract": CONTRACT,
+                "robot_profile": robot,
+                "model_fingerprint": model_fingerprint(self.retargeter.profile),
+            }
             context = zmq.Context.instance() if context is None else context
             self.commands = context.socket(zmq.PUB)
             self._resources.callback(self.commands.close, linger=0)
@@ -96,194 +144,30 @@ class RoboJuDoBridge:
         except Exception:
             self.close()
             raise
-        self.bridge_id = uuid.uuid4().hex
-        self._frame_id = 0
-        self._key = None
-        self._state_id = -1
-        self._last_warning = float("-inf")
-        self._feedback_timeout = 0.1
-        self._outstanding = OrderedDict()
-        self._completion_records = OrderedDict()
-        self._latest = None
-        self._multipart = False
-        self.status = "waiting for robot feedback"
-        self.hold_reason = "no fresh robot feedback received"
-        self._xr_timestamp = None
-        self._xr_changed_at = None
-        self._xr_updates = 0
-        self._xr_grips = {}
-        self._xr_triggers = {}
-        self._xr_report_at = time.monotonic()
-        self._timing_ms = {}
-        self._timing_samples = {}
-        self._feedback_details = {}
-        self._completion_sources = {}
-        self._proposal_count = self._completion_count = 0
-
-    def _record_timing(self, name, value):
-        self._timing_ms[name] = value
-        self._timing_samples.setdefault(name, deque(maxlen=512)).append(value)
+        self._command_log = _CommandLog(self.bridge_id)
 
     def close(self):
-        try:
-            if hasattr(self, "_outstanding"):
-                self._clear_outstanding()
-        finally:
-            self._resources.close()
-            try:
-                self.trace.export()
-            except OSError:
-                logger.exception("Could not export latency trace")
-
-    def _clear_outstanding(self):
-        records = list(self._outstanding.values())
-        self._outstanding.clear()
-        self._completion_records.clear()
-        self._completion_seen.clear()
-        for _, transaction, _, _, _ in records:
-            self.retargeter.discard_proposal(transaction)
-
-    def _completion_match(self, state, record):
-        positions, _, baseline = record
-        current = (state["session_id"], state["generation"], state["command_id"])
-        if self.authoritative_executor:
-            return current[:2] == baseline[:2]
-        return current == (*baseline[:2], baseline[2] + 1) and positions == state["last_commanded_positions"]
-
-    def _observe_completion_timing(self, state, now):
-        """Observe once without consuming solver transactions or selecting targets."""
-        frame_id = state.get("applied_frame_id")
-        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
-            return
-        record = self._completion_records.get(frame_id)
-        if record is None or frame_id in self._completion_seen or not self._completion_match(state, record):
-            return
-        self._completion_seen[frame_id] = state["state_id"]
-        while len(self._completion_seen) > 512:
-            self._completion_seen.popitem(last=False)
-        _, sent_at, _ = record
-        if self.trace.enabled:
-            self.trace.record("completion_observed", **identity(state, applied=True), metric_at=now)
-        # Observe hardware completion even if its solver transaction expired.
-        self._record_timing("completion_latency", 1000 * (now - sent_at))
-        self._completion_count += 1
-        # Compare durations only: bridge and robot may run on different hosts.
-        diagnostics = state.get("feedback_diagnostics", {})
-        stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
-        if isinstance(diagnostics, dict):
-            source = diagnostics.get("completion_observation_source")
-            if source in ("idle", "periodic", "before_policy", "after_policy"):
-                self._completion_sources[source] = self._completion_sources.get(source, 0) + 1
-        if isinstance(stamps, dict):
-            # Older robots lack first-publication metadata.
-            publication = "first_feedback_built" if "first_feedback_built" in stamps else "feedback_built"
-            intervals = {
-                "robot_admission": ("received", "hand_submitted"),
-                "executor_validation": ("executor_validation_started", "executor_validation_completed"),
-                "robot_ack_wait": ("acknowledged", publication),
-                "robot_total": ("received", publication),
-                "worker_to_parent": ("worker_completion_ready", "parent_snapshot_received"),
-                "parent_to_ack": ("parent_snapshot_received", "acknowledged"),
-                "arm_submission": ("arm_submission_started", "arm_submission_completed"),
-            }
-            if publication == "first_feedback_built":
-                intervals["feedback_snapshot_lag"] = (publication, "feedback_built")
-            for side in ("left", "right"):
-                intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
-                intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
-                intervals[f"{side}_hand_read"] = (f"{side}_read_started", f"{side}_read_completed")
-                intervals[f"{side}_receipt_to_write"] = ("received", f"{side}_write_completed")
-            for label, (start, end) in intervals.items():
-                try:
-                    duration = 1000 * (_number(stamps[end]) - _number(stamps[start]))
-                except (KeyError, TypeError, ValueError, OverflowError):
-                    continue
-                if duration >= 0:
-                    self._record_timing(label, duration)
-                    if label == "robot_total":
-                        residual = 1000 * (now - sent_at) - duration
-                        if residual >= 0:
-                            self._record_timing("transport_and_poll", residual)
-            try:
-                starts = [
-                    _number(stamps[name])
-                    for name in ("arm_submission_started", "left_write_started", "right_write_started")
-                ]
-            except (KeyError, TypeError, ValueError, OverflowError):
-                pass
-            else:
-                self._record_timing("submission_skew", 1000 * (max(starts) - min(starts)))
-            try:
-                completed = max(_number(stamps[f"{side}_write_completed"]) for side in ("left", "right"))
-                delay = 1000 * (_number(stamps["acknowledged"]) - completed)
-            except (KeyError, TypeError, ValueError, OverflowError):
-                pass
-            else:
-                if delay >= 0:
-                    self._record_timing("completion_observation", delay)
-
-    def _observe_completion(self, state, now):
-        frame_id = state.get("applied_frame_id")
-        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
-            return
-        self._observe_completion_timing(state, now)
-        record = self._completion_records.pop(frame_id, None)
-        if record is None:
-            return
-        positions, _, _ = record
-        transaction_record = self._outstanding.pop(frame_id, None)
-        matched = self._completion_match(state, record)
-        try:
-            if transaction_record is not None:
-                transaction = transaction_record[1]
-                if matched:
-                    self.retargeter.complete_proposal(transaction, positions)
-                else:
-                    self.retargeter.discard_proposal(transaction)
-        except (RuntimeError, ValueError, TypeError) as exc:
-            # Completion bookkeeping never gates the publishing schedule.
-            self._warn(exc)
-            self.retargeter.backend.reset()
-            self._clear_outstanding()
-        # Earlier proposals can no longer be selected after this completion.
-        for older in list(self._outstanding):
-            if older < frame_id:
-                self.retargeter.discard_proposal(self._outstanding.pop(older)[1])
-        for older in list(self._completion_records):
-            if older < frame_id:
-                self._completion_records.pop(older)
-
-    def _expire_outstanding(self, now):
-        for frame_id, record in list(self._outstanding.items()):
-            if now > record[3]:
-                self.retargeter.discard_proposal(self._outstanding.pop(frame_id)[1])
-        while len(self._outstanding) > 512:
-            self.retargeter.discard_proposal(self._outstanding.popitem(last=False)[1][1])
-        # Retain only lightweight completion metadata beyond the solver deadline.
-        while len(self._completion_records) > 512:
-            self._completion_records.popitem(last=False)
-
-    def _rebase(self):
-        try:
-            self.retargeter.rebase()
-        finally:
-            self._clear_outstanding()
+        self._resources.close()
 
     def _warn(self, exc):
         if time.monotonic() - self._last_warning >= 1:
             logger.warning("XR bridge: %s", exc)
             self._last_warning = time.monotonic()
 
+    def _hold(self, reason):
+        self._latest = None
+        self.retargeter.rebase()
+        self.status, self.hold_reason = "hold", reason
+        return False
+
     def validate_feedback(self, state):
         if (
             not isinstance(state, dict)
             or type(state.get("schema_version")) is not int
-            or state["schema_version"]
-            != (3 if self.authoritative_executor else (2 if self.retargeter.hand_names else 1))
+            or state["schema_version"] != 3
             or state.get("type") != "upper_body_state"
         ):
-            version = 3 if self.authoritative_executor else (2 if self.retargeter.hand_names else 1)
-            raise ValueError(f"expected upper_body_state schema version {version}")
+            raise ValueError("expected upper_body_state schema version 3")
         if not isinstance(state.get("session_id"), str) or not 1 <= len(state["session_id"]) <= 64:
             raise ValueError("invalid robot session")
         for name in ("state_id", "command_id", "generation"):
@@ -303,34 +187,61 @@ class RoboJuDoBridge:
                 _number(value)
         limits = state.get("position_limits")
         if not isinstance(limits, dict) or set(limits) != set(self.retargeter.command_names):
-            raise ValueError("incompatible arm limit names")
+            raise ValueError("incompatible command limit names")
         for bounds in limits.values():
             if not isinstance(bounds, list) or len(bounds) != 2 or _number(bounds[0]) >= _number(bounds[1]):
-                raise ValueError("invalid arm position limits")
+                raise ValueError("invalid position limits")
         for key in ("control_dt", "arm_velocity_limit", "return_velocity_limit", "feedback_timeout_s"):
             if _number(state.get(key)) <= 0:
                 raise ValueError(f"invalid positive parameter: {key}")
-        if state.get("hand_command_mode", "filtered") not in {"filtered", "direct"}:
-            raise ValueError("invalid hand command mode")
-        if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
-            raise ValueError("invalid positive hand_velocity_limit")
-        if self.authoritative_executor:
-            if state.get("executor") != self.executor_contract or state.get("hand_command_mode") != "direct":
-                raise ValueError("incompatible executor model, collision policy or hand mode")
-        contract = "robojudo_executor_v1" if self.authoritative_executor else "robojudo_filter_v1"
-        if state.get("filter_contract") != contract:
-            raise ValueError("incompatible robot filter contract")
-        arms = state.get("arm_joint_names")
-        if (
-            not isinstance(arms, list)
-            or len(arms) != len(self.retargeter.arm_names)
-            or set(arms) != set(self.retargeter.arm_names)
-        ):
-            raise ValueError("incompatible arm joint names")
-        if not 0 <= _number(state.get("ema_alpha")) < 1:
-            raise ValueError("invalid EMA alpha")
         if not all(0 <= age <= state["feedback_timeout_s"] for age in state["joint_age_s"].values()):
             raise ValueError("robot joint measurements are stale")
+        contract = state.get("executor")
+        policy_keys = {"collision_checking", "collision_margin", "collision_trigger"}
+        if self.retargeter.hand_names:
+            policy_keys.update(("hand_command_mode", "hand_velocity_limit"))
+        if (
+            not isinstance(contract, dict)
+            or set(contract) != set(self._model_identity) | policy_keys
+            or any(contract.get(k) != v for k, v in self._model_identity.items())
+        ):
+            raise ValueError("incompatible executor model or robot profile")
+        if type(contract["collision_checking"]) is not bool:
+            raise ValueError("invalid collision enablement")
+        if not 0 < _number(contract["collision_margin"]) < _number(contract["collision_trigger"]):
+            raise ValueError("invalid collision policy")
+        if self.retargeter.hand_names:
+            if contract["hand_command_mode"] not in ("filtered", "direct"):
+                raise ValueError("invalid finger control mode")
+            if _number(contract["hand_velocity_limit"]) <= 0:
+                raise ValueError("invalid finger velocity limit")
+        if self._policy_session == state["session_id"] and contract != self.executor_contract:
+            raise ValueError("robot collision policy or finger settings changed within a session")
+
+    def _adopt_policy(self, state):
+        if self._policy_session == state["session_id"]:
+            return
+        contract = state["executor"]
+        settings = replace(
+            self.settings,
+            **{
+                k: contract[k]
+                for k in (
+                    "collision_checking",
+                    "collision_margin",
+                    "collision_trigger",
+                )
+            },
+        )
+        self.retargeter.configure_collision_policy(settings)
+        self.settings = settings
+        self.executor_contract = dict(contract)
+        self._policy_session = state["session_id"]
+        logger.info(
+            "Robot XR profile %s; collision checking %s",
+            self.robot_name,
+            "enabled" if settings.collision_checking else "disabled",
+        )
 
     def _xr_frame(self):
         if self.xr_client is None:
@@ -351,141 +262,17 @@ class RoboJuDoBridge:
             if profile.hands is None
             else {side: xr.get_key_value_by_name(f"{side}_trigger") for side in profile.hands.groups},
         )
-        if self._xr_timestamp != frame.timestamp_ns:
-            self._xr_changed_at = time.monotonic()
-            self._xr_updates += 1
-        self._xr_timestamp = frame.timestamp_ns
-        self._xr_grips = frame.grips.copy()
-        self._xr_triggers = frame.triggers.copy()
         return frame
 
-    def report_xr_diagnostics(self):
-        """Report observed SDK updates independently of IK and clutch decisions."""
-        now = time.monotonic()
-        elapsed = now - self._xr_report_at
-        if elapsed < 2.0:
-            return
-        age = "unknown" if self._xr_changed_at is None else f"{1000 * (now - self._xr_changed_at):.0f} ms"
-
-        def inputs(values):
-            result = []
-            for side in ("left", "right"):
-                try:
-                    result.append(f"{_number(values.get(side)):.2f}")
-                except (TypeError, ValueError, OverflowError):
-                    result.append("?")
-            return "/".join(result)
-
-        logger.info(
-            "XR: %.1f Hz, age=%s, intent=%s; grips=%s, triggers=%s (L/R)",
-            self._xr_updates / elapsed,
-            age,
-            getattr(self, "_robot_intent", "no feedback"),
-            inputs(self._xr_grips),
-            inputs(self._xr_triggers),
-        )
-        oldest = self._feedback_details.get("oldest_joint")
-        source = "unknown"
-        if isinstance(oldest, str):
-            source = "left hand" if oldest.startswith("L_") else "right hand" if oldest.startswith("R_") else "body"
-        samples = self._timing_samples.get("feedback_age_at_publish")
-        if self._feedback_details.get("valid") is False:
-            summary = f"unavailable ({source})"
-        elif samples:
-            summary = f"age={samples[-1]:.1f} ms ({source}), p95={np.percentile(samples, 95):.1f} ms"
-        else:
-            summary = "waiting for measurements"
-        counts = self._feedback_details.get("command_counts", {})
-        counts = counts if isinstance(counts, dict) else {}
-        receiver_summary = ", ".join(
-            f"{name}={counts[name]}"
-            for name in ("received", "superseded", "rejected", "completed")
-            if type(counts.get(name)) is int and counts[name] >= 0
-        )
-        logger.info(
-            "Feedback: %s; sent=%d, completed=%d; publish=%.1f Hz%s",
-            summary,
-            self._proposal_count,
-            self._completion_count,
-            self._proposal_count / elapsed,
-            f"; robot {receiver_summary}" if receiver_summary else "",
-        )
-        stages = []
-        for label, name in (
-            ("policy", "policy"),
-            ("env_step", "env_step"),
-            ("checkpoint_before", "checkpoint_before"),
-            ("checkpoint_after", "checkpoint_after"),
-            ("retarget", "retarget"),
-            ("xr_sample", "xr_sample"),
-            ("ik", "ik"),
-            ("completion_latency", "completion_latency"),
-        ):
-            values = self._timing_samples.get(name)
-            if values:
-                stages.append(f"{label}={np.percentile(values, 95):.1f}")
-        if stages:
-            logger.info("Processing p95 (ms): %s", ", ".join(stages))
-        completion_stages = (
-            "robot_admission",
-            "left_hand_queue",
-            "left_hand_write",
-            "right_hand_queue",
-            "right_hand_write",
-            "left_hand_read",
-            "right_hand_read",
-            "left_receipt_to_write",
-            "right_receipt_to_write",
-            "arm_submission",
-            "submission_skew",
-            "completion_observation",
-            "worker_to_parent",
-            "parent_to_ack",
-            "robot_ack_wait",
-            "feedback_snapshot_lag",
-            "robot_total",
-            "transport_and_poll",
-        )
-        breakdown = [
-            f"{name}={np.percentile(self._timing_samples[name], 95):.1f}"
-            for name in completion_stages
-            if self._timing_samples.get(name)
-        ]
-        if breakdown:
-            logger.info("Completion p95 (ms): %s", ", ".join(breakdown))
-        if self._completion_sources:
-            logger.info(
-                "Completion observations: idle=%d, periodic=%d, before_policy=%d, after_policy=%d",
-                self._completion_sources.get("idle", 0),
-                self._completion_sources.get("periodic", 0),
-                self._completion_sources.get("before_policy", 0),
-                self._completion_sources.get("after_policy", 0),
-            )
-        if self._timing_samples.get("ik_calls"):
-            calls = sum(self._timing_samples["ik_calls"])
-            tracked = sum(self._timing_samples.get("ik_tracked_calls", ()))
-            warm = sum(self._timing_samples.get("ik_warm_calls", ()))
-            iterations = self._timing_samples.get("ik_iterations")
-            logger.info(
-                "IK: calls=%d, warm=%d/%d%s",
-                calls,
-                warm,
-                tracked,
-                f"; iterations per step p95={np.percentile(iterations, 95):.1f}" if iterations else "",
-            )
-        self._timing_samples.clear()
-        self._completion_sources.clear()
-        self._proposal_count = self._completion_count = 0
-        self._xr_updates = 0
-        self._xr_report_at = now
-
     def poll(self):
-        """Publish at most one proposal using the newest validated feedback."""
-        latest = self.receive_feedback()
-        return self._publish_proposal(latest) if latest else False
+        try:
+            latest = self.receive_feedback()
+            return self._publish_desired(latest) if latest else False
+        finally:
+            self._command_log.report(self.status)
 
     def wait_until_publish(self, deadline):
-        """Observe completion between publishing ticks without running IK."""
+        """Drain feedback between ticks without sampling XR or running IK."""
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -494,156 +281,69 @@ class RoboJuDoBridge:
                 self.receive_feedback()
 
     def receive_feedback(self):
-        """Bound receive/bookkeeping work without sampling XR or issuing commands."""
-        latest = None
-        invalid_feedback = False
-        completion_snapshots = []
+        latest, received_at = None, None
+        invalid = False
         for _ in range(32):
             try:
                 payload = self.feedback.recv(flags=zmq.NOBLOCK)
-                packet_received_at = time.monotonic()
+                packet_at = time.monotonic()
             except zmq.Again:
                 break
             more = bool(self.feedback.getsockopt(zmq.RCVMORE))
-            multipart = self._multipart or more
-            self._multipart = more
+            multipart, self._multipart = self._multipart or more, more
             if multipart:
                 continue
-            state = None
             try:
                 if len(payload) > 65_536:
                     raise ValueError("feedback exceeds size limit")
                 state = json.loads(payload, object_pairs_hook=_unique_object)
-                if isinstance(state, dict) and state.get("type") == "upper_body_state":
-                    details = state.get("feedback_diagnostics", {})
-                    self._feedback_details = {
-                        **(details if isinstance(details, dict) else {}),
-                        "state_id": state.get("state_id"),
-                        "valid": state.get("valid"),
-                    }
                 self.validate_feedback(state)
-                if self.trace.enabled:
-                    details = state.get("feedback_diagnostics", {})
-                    details = details if isinstance(details, dict) else {}
-                    self.trace.record(
-                        "feedback_received",
-                        at=packet_received_at,
-                        **identity(state, applied=True),
-                        valid=True,
-                        first_ack_state_id=(
-                            details.get("first_ack_state_id")
-                            if type(details.get("first_ack_state_id")) is int
-                            else None
-                        ),
-                        stamps=command_stamps(details.get("command_timestamps")),
-                    )
-                completion_snapshots.append((state, packet_received_at))
-                latest = state
+                if (state["session_id"], state["generation"]) != self._key:
+                    self._command_log.pending.clear()
+                else:
+                    self._command_log.completed(state, packet_at)
+                latest, received_at = state, packet_at
             except (TypeError, ValueError, RecursionError, OverflowError) as exc:
-                if self.trace.enabled:
-                    self.trace.record(
-                        "feedback_received",
-                        at=packet_received_at,
-                        valid=False,
-                        **(identity(state, applied=True) if isinstance(state, dict) else {}),
-                    )
                 latest = None
-                invalid_feedback = True
-                self.status = "hold"
-                self.hold_reason = f"invalid robot feedback: {exc}"
+                invalid = True
                 self._warn(exc)
+                self.hold_reason = f"invalid robot feedback: {exc}"
         else:
-            self._latest = None
-            self._rebase()
-            self.status = "feedback backlog"
-            self.hold_reason = "feedback receive budget exhausted; waiting for fresh state"
-            return False
-        if latest is None and invalid_feedback:
-            self._latest = None
-            self._rebase()
-            return False
-        now = time.monotonic()
+            return self._hold("feedback receive budget exhausted; waiting for fresh state")
+        if latest is None and invalid:
+            return self._hold(self.hold_reason)
         if latest is not None and (
             (latest["session_id"], latest["generation"]) != self._key or latest["state_id"] > self._state_id
         ):
-            self._latest = latest
-            self._received_at = now
-        else:
-            latest = self._latest
-        if latest is None or now - self._received_at > self._feedback_timeout:
-            self._rebase()
-            self.status = "waiting for robot feedback"
-            self.hold_reason = "robot feedback missing or timed out"
-            return False
+            try:
+                self._adopt_policy(latest)
+            except (RuntimeError, ValueError, ImportError, OSError) as exc:
+                self._warn(exc)
+                return self._hold(f"collision policy initialization failed: {exc}")
+            self._latest, self._received_at = latest, received_at
+        latest = self._latest
+        now = time.monotonic()
+        if (
+            latest is None
+            or now - self._received_at + max(latest["joint_age_s"].values()) > latest["feedback_timeout_s"]
+        ):
+            return self._hold("robot feedback missing or timed out")
         key = (latest["session_id"], latest["generation"])
         if key != self._key:
             same_robot = self._key is not None and key[0] == self._key[0]
             if same_robot and latest.get("reset_reason") == "tracking command timeout":
-                self._rebase()
+                self.retargeter.rebase()
             else:
                 self.retargeter.reset()
-            if self._key is not None:
-                logger.info("Robot feedback generation changed: %s", latest.get("reset_reason", "session reset"))
             self._key = key
-            self._state_id = -1
-            self._clear_outstanding()
-            self._timing_ms.clear()
         self._state_id = latest["state_id"]
         self._feedback_timeout = latest["feedback_timeout_s"]
-        self._robot_intent = latest["intent"]
-        self._record_timing("feedback_age_at_publish", 1000 * max(latest["joint_age_s"].values()))
-        sources = self._feedback_details.get("source_age_ms", {})
-        sources = sources if isinstance(sources, dict) else {}
-        extra_timing = {
-            f"{source}_measurement_age": sources.get(source) for source in ("body", "left_hand", "right_hand")
-        }
-        for name in ("handoff_delay_ms", "snapshot_cache_age_ms"):
-            extra_timing[f"hand_{name.removesuffix('_ms')}"] = self._feedback_details.get(name)
-        previous = self._feedback_details.get("previous_publication")
-        previous = previous if isinstance(previous, dict) else {}
-        for name in ("build_ms", "encode_send_ms"):
-            extra_timing[f"previous_feedback_{name.removesuffix('_ms')}"] = previous.get(name)
-        for name, value in extra_timing.items():
-            self._timing_ms.pop(name, None)
-            try:
-                value = _number(value)
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if value >= 0:
-                self._record_timing(name, value)
-        pipeline_timing = latest.get("pipeline_timing_ms", {})
-        for name in (
-            "policy",
-            "env_step",
-            "checkpoint_before",
-            "checkpoint_after",
-            "body_snapshot",
-            "hand_snapshot",
-            "feedback_assembly",
-        ):
-            self._timing_ms.pop(name, None)
-            if isinstance(pipeline_timing, dict):
-                try:
-                    value = _number(pipeline_timing.get(name))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if value >= 0:
-                    self._record_timing(name, value)
-        self._expire_outstanding(now)
-        if self.observe_all_completions:
-            for state, received_at in completion_snapshots:
-                if (state["session_id"], state["generation"]) == self._key:
-                    self._observe_completion_timing(state, received_at)
-        self._observe_completion(latest, now)
         return latest
 
-    def _publish_proposal(self, latest):
-        baseline = (latest["session_id"], latest["generation"], latest["command_id"])
+    def _publish_desired(self, latest):
         try:
-            retarget_started = time.monotonic()
             frame = self._xr_frame() if latest["intent"] == "TRACK" else None
-            self._record_timing("xr_sample", 1000 * (time.monotonic() - retarget_started))
-            proposal = self.retargeter.step(
+            desired = self.retargeter.step(
                 latest["positions"],
                 latest["last_commanded_positions"],
                 latest["default_positions"],
@@ -652,111 +352,31 @@ class RoboJuDoBridge:
                 frame=frame,
                 control_dt=latest["control_dt"],
                 desired_only=True,
+                streaming=True,
+                authoritative_executor=True,
                 arm_velocity_limit=latest["arm_velocity_limit"],
                 return_velocity_limit=latest["return_velocity_limit"],
-                hand_command_mode=latest.get("hand_command_mode", "filtered"),
-                hand_velocity_limit=latest.get("hand_velocity_limit"),
-                streaming=True,
-                authoritative_executor=self.authoritative_executor,
             )
-            desired_positions = proposal
-            if proposal is not None and not self.authoritative_executor:
-                arms = set(latest["arm_joint_names"])
-                homing = self.retargeter.status == "homing"
-                speeds = {
-                    n: (
-                        min(latest["arm_velocity_limit"], latest["return_velocity_limit"])
-                        if homing
-                        else latest["arm_velocity_limit"]
-                    )
-                    if n in arms
-                    else (0.0 if homing else latest["hand_velocity_limit"])
-                    for n in proposal
-                }
-                # Bound desired targets by bridge settings and model velocities
-                # before predicting the robot-owned filter. Both peers still
-                # reproduce the same issued target without a protocol exception.
-                local_speeds = {}
-                for name in proposal:
-                    if name in arms:
-                        local_speeds[name] = min(
-                            speeds[name], self.settings.arm_velocity_limit, self.retargeter.velocities[name]
-                        )
-                        if homing:
-                            local_speeds[name] = min(local_speeds[name], self.settings.return_velocity_limit)
-                    else:
-                        local_speeds[name] = min(
-                            speeds[name],
-                            self.settings.hand_velocity_limit,
-                            self.retargeter.profile.hands.velocities[name],
-                        )
-                bounded = filter_targets(
-                    desired_positions,
-                    latest["last_commanded_positions"],
-                    latest["position_limits"],
-                    local_speeds,
-                    latest["control_dt"],
-                    0.0,
-                )
-                if latest.get("hand_command_mode") == "direct" and not homing:
-                    bounded.update({n: desired_positions[n] for n in proposal if n not in arms})
-                desired_positions = bounded
-                proposal = filter_targets(
-                    desired_positions,
-                    latest["last_commanded_positions"],
-                    latest["position_limits"],
-                    speeds,
-                    latest["control_dt"],
-                    latest["ema_alpha"],
-                )
-                if latest.get("hand_command_mode") == "direct" and not homing:
-                    for n in proposal:
-                        if n not in arms:
-                            proposal[n] = desired_positions[n]
-                r = self.retargeter
-                saved = r.robot.state.q.copy()
-                try:
-                    for n, v in latest["positions"].items():
-                        r.robot.set_joint(n, v)
-                    measured = r.robot.state.q.copy()
-                    previous = measured.copy()
-                    candidate = measured.copy()
-                    for n in proposal:
-                        offset = r.robot.get_joint_offset(n)
-                        previous[offset] = latest["last_commanded_positions"][n]
-                        candidate[offset] = proposal[n]
-                    r._project_hands(previous)
-                    r._project_hands(candidate)
-                    r._validate_motion(measured, previous, candidate)
-                    r._pending_positions = proposal.copy()
-                finally:
-                    r.robot.state.q = saved
-            self.status = self.retargeter.status
-            self.hold_reason = self.retargeter.hold_reason
-            self._record_timing("retarget", 1000 * (time.monotonic() - retarget_started))
-            diagnostics = getattr(self.retargeter, "solver_diagnostics", {})
-            if isinstance(diagnostics, dict) and diagnostics.get("calls"):
-                self._record_timing("ik", diagnostics["ik_ms"])
-                self._record_timing("ik_calls", diagnostics["calls"])
-                for key in ("tracked_calls", "warm_calls", "iterations"):
-                    if key in diagnostics:
-                        self._record_timing(f"ik_{key}", diagnostics[key])
-            # Remote clocks are never compared. This excludes transit/queueing;
-            # the robot performs the authoritative full-age check at application.
-            age_lower_bound = max(latest["joint_age_s"].values()) + time.monotonic() - self._received_at
-            self._record_timing("measurement_age_lower_bound", 1000 * age_lower_bound)
-            if age_lower_bound > latest["feedback_timeout_s"]:
-                self._rebase()
-                self.status = "stale robot feedback"
-                self.hold_reason = "robot measurements expired during retargeting"
-                return False
+            self.status, self.hold_reason = self.retargeter.status, self.retargeter.hold_reason
+            age = max(latest["joint_age_s"].values()) + time.monotonic() - self._received_at
+            if age > latest["feedback_timeout_s"]:
+                return self._hold("robot measurements expired during retargeting")
             visualize = latest.get("visualize_targets") is True
-            if proposal is None and not visualize:
+            if desired is None and not visualize:
                 return False
+            active = [
+                n for side, names in self.retargeter.arm_joints.items() if self.retargeter.active[side] for n in names
+            ]
+            hands = self.retargeter.profile.hands
+            if hands is not None and self.status == "tracking" and frame is not None:
+                for side, names in hands.groups.items():
+                    trigger = frame.triggers.get(side)
+                    if not isinstance(trigger, bool) and isinstance(trigger, Real) and np.isfinite(trigger):
+                        active.extend(names)
             self._frame_id += 1
             message = {
-                "schema_version": 2 if self.retargeter.hand_names else 1,
-                "type": "upper_body_proposal" if proposal is not None else "upper_body_visualization",
+                "schema_version": 3,
+                "type": "upper_body_desired" if desired is not None else "upper_body_visualization",
                 "bridge_id": self.bridge_id,
                 "session_id": latest["session_id"],
                 "generation": latest["generation"],
@@ -765,71 +385,27 @@ class RoboJuDoBridge:
                 "frame_id": self._frame_id,
                 "intent": latest["intent"],
                 "status": self.status,
-                "positions": proposal,
-                "desired_positions": desired_positions,
-                "filter_contract": "robojudo_filter_v1",
-                "hand_command_mode": latest.get("hand_command_mode", "filtered"),
+                "positions": desired,
+                "active_joint_names": active,
+                "executor": self.executor_contract,
+                "velocity_limits": {
+                    "arm": self.settings.arm_velocity_limit,
+                    "return": self.settings.return_velocity_limit,
+                },
             }
-            if self.authoritative_executor:
-                active = [
-                    n
-                    for side, names in self.retargeter.arm_joints.items()
-                    if self.retargeter.active[side]
-                    for n in names
-                ]
-                if self.status == "tracking" and frame is not None:
-                    for side, names in self.retargeter.profile.hands.groups.items():
-                        trigger = frame.triggers.get(side)
-                        if not isinstance(trigger, bool) and isinstance(trigger, Real) and np.isfinite(trigger):
-                            active.extend(names)
-                message.update(
-                    active_joint_names=active,
-                    schema_version=3,
-                    type="upper_body_desired" if proposal is not None else "upper_body_visualization",
-                    filter_contract="robojudo_executor_v1",
-                    executor=self.executor_contract,
-                    velocity_limits={
-                        "arm": self.settings.arm_velocity_limit,
-                        "return": self.settings.return_velocity_limit,
-                        "hand": self.settings.hand_velocity_limit,
-                    },
-                )
-                message.pop("desired_positions")
             if visualize:
                 message["target_poses"] = self.retargeter.target_poses
-            self.commands.send_json(
-                message,
-                flags=zmq.NOBLOCK,
-                allow_nan=False,
-            )
-            if proposal is None:
-                return False
             sent_at = time.monotonic()
-            self._completion_records[self._frame_id] = (proposal.copy(), sent_at, baseline)
-            if self.trace.enabled:
-                self.trace.record("command_published", at=sent_at, **identity(message), sampled_at=retarget_started)
-            if self.authoritative_executor:
-                # Successful desired IK advances solver history, independently of execution.
-                self.retargeter.acknowledge(proposal)
-                self._expire_outstanding(time.monotonic())
-                self._proposal_count += 1
-                return True
-            self._outstanding[self._frame_id] = (
-                proposal.copy(),
-                self.retargeter.detach_proposal(),
-                sent_at,
-                self._received_at + latest["feedback_timeout_s"],
-                baseline,
-            )
-            self._expire_outstanding(time.monotonic())
-            self._proposal_count += 1
+            self.commands.send_json(message, flags=zmq.NOBLOCK, allow_nan=False)
+            if desired is None:
+                return False
+            self._command_log.sent(latest["session_id"], latest["generation"], self._frame_id, sent_at)
+            if not self.retargeter.acknowledge(desired):
+                return self._hold("desired IK history could not be committed")
             return True
         except (RuntimeError, TypeError, ValueError, OverflowError, zmq.ZMQError) as exc:
-            self._rebase()
-            self.status = "hold"
-            self.hold_reason = str(exc) or type(exc).__name__
             self._warn(exc)
-            return False
+            return self._hold(str(exc) or type(exc).__name__)
 
 
 def main(
@@ -838,39 +414,15 @@ def main(
     scale_factor: float = DEFAULTS.scale_factor,
     arm_velocity_limit: float = DEFAULTS.arm_velocity_limit,
     return_velocity_limit: float = DEFAULTS.return_velocity_limit,
-    hand_velocity_limit: float = DEFAULTS.hand_velocity_limit,
-    collision_margin: float = DEFAULTS.collision_margin,
-    collision_trigger: float = DEFAULTS.collision_trigger,
-    control_frequency: float = DEFAULTS.control_frequency,
-    tracking_timeout_s: float = DEFAULTS.tracking_timeout_s,
-    grip_threshold: float = DEFAULTS.grip_threshold,
-    xr_diagnostics: bool = False,
     robot: str = "x2",
     ik_backend: BackendName = BackendName.placo,
-    collision_checking: tyro.conf.FlagCreatePairsOff[bool] = False,
-    authoritative_executor: bool = False,
-    observe_all_completions: bool = True,
-    latency_trace_path: str | None = None,
-    latency_trace_duration_s: float = 30.0,
-    latency_trace_delay_s: float = 0.0,
 ):
-    """Publish bounded joint targets from live measured RoboJuDo feedback.
-
-    Args:
-        collision_checking: Enable collision avoidance and arm/hand path checks; omitted means disabled.
-    """
+    """Publish bounded joint targets from live measured RoboJuDo feedback."""
     logging.basicConfig(level=logging.INFO)
     settings = TeleopSettings(
         scale_factor=scale_factor,
         arm_velocity_limit=arm_velocity_limit,
         return_velocity_limit=return_velocity_limit,
-        hand_velocity_limit=hand_velocity_limit,
-        collision_margin=collision_margin,
-        collision_trigger=collision_trigger,
-        control_frequency=control_frequency,
-        tracking_timeout_s=tracking_timeout_s,
-        grip_threshold=grip_threshold,
-        collision_checking=collision_checking,
     )
     if robot not in PROFILES:
         raise ValueError(f"Unknown robot {robot!r}; choose from {tuple(PROFILES)}")
@@ -880,13 +432,7 @@ def main(
         settings,
         robot=robot,
         ik_backend=ik_backend,
-        authoritative_executor=authoritative_executor,
-        observe_all_completions=observe_all_completions,
-        latency_trace_path=latency_trace_path,
-        latency_trace_duration_s=latency_trace_duration_s,
-        latency_trace_delay_s=latency_trace_delay_s,
     )
-    logger.info("XR collision checking: %s", "enabled" if settings.collision_checking else "disabled")
     logger.info(
         "Robot bridge publishing %s, receiving %s; release all grips before engaging",
         command_endpoint,
@@ -894,13 +440,11 @@ def main(
     )
     try:
         status = None
-        period = 1 / control_frequency
+        period = 1 / settings.control_frequency
         deadline = time.monotonic()
         while True:
             bridge.wait_until_publish(deadline)
             bridge.poll()
-            if xr_diagnostics:
-                bridge.report_xr_diagnostics()
             current = (bridge.status, bridge.hold_reason)
             if status != current:
                 detail = f" ({bridge.hold_reason})" if bridge.hold_reason else ""

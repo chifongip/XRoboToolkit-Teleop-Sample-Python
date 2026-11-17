@@ -22,25 +22,8 @@ class CollisionToggleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "arm_velocity_limit"):
             TeleopSettings(collision_checking=False, arm_velocity_limit=0)
 
-    def test_cli_enables_collision_checking_only_when_flag_is_present(self):
-        for args, expected in (
-            ([], False),
-            (["--collision-checking"], True),
-        ):
-            bridge = Mock()
-            bridge.poll.side_effect = KeyboardInterrupt
-            with (
-                self.subTest(args=args),
-                patch("xrobotoolkit_teleop.integrations.robojudo.RoboJuDoBridge", return_value=bridge) as factory,
-                self.assertLogs("xrobotoolkit_teleop.integrations.robojudo", level="INFO") as logs,
-            ):
-                tyro.cli(main, args=args)
-            self.assertIs(factory.call_args.args[2].collision_checking, expected)
-            self.assertTrue(
-                any(f"collision checking: {'enabled' if expected else 'disabled'}" in line for line in logs.output)
-            )
-            bridge.close.assert_called_once()
-        for args in (["--no-collision-checking"], ["--collision-checking", "True"], ["--collision-checking", "False"]):
+    def test_bridge_cli_has_no_collision_override(self):
+        for args in (["--collision-checking"], ["--no-collision-checking"]):
             with self.subTest(args=args), self.assertRaises(SystemExit):
                 tyro.cli(main, args=args, console_outputs=False)
 

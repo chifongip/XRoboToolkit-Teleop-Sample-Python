@@ -1,9 +1,9 @@
 """Fixed-body X2 teleoperation with independently loaded IK backends."""
 
-from contextlib import ExitStack
 import math
 import time
 import xml.etree.ElementTree as ET
+from contextlib import ExitStack
 from pathlib import Path
 
 import mujoco
@@ -12,8 +12,8 @@ from meshcat import transformations as tf
 from mujoco import viewer as mj_viewer
 from numpy.polynomial.polynomial import polyval
 
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
 from xrobotoolkit_teleop.common.xr_client import XrClient
-from xrobotoolkit_teleop.common.x2_defaults import DEFAULTS
 from xrobotoolkit_teleop.ik import BACKENDS, create_backend
 from xrobotoolkit_teleop.ik.safety import CollisionPolicy
 from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint, PoseTarget, RobotSpec
