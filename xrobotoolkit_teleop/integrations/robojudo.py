@@ -54,7 +54,10 @@ class RoboJuDoBridge:
         latency_trace_path=None,
         latency_trace_duration_s=30.0,
         latency_trace_delay_s=0.0,
+        feedback_receive_hwm=8,
     ):
+        if type(feedback_receive_hwm) is not int or not 1 <= feedback_receive_hwm <= 16:
+            raise ValueError("feedback_receive_hwm must be an integer between 1 and 16")
         self.trace = LatencyTrace(latency_trace_path, latency_trace_duration_s, latency_trace_delay_s)
         self.observe_all_completions = observe_all_completions
         self._completion_seen = OrderedDict()
@@ -89,10 +92,11 @@ class RoboJuDoBridge:
             self.commands.setsockopt(zmq.SNDHWM, 1)
             self.commands.bind(command_endpoint)
             self.feedback.setsockopt(zmq.LINGER, 0)
-            self.feedback.setsockopt(zmq.RCVHWM, 8)
+            self.feedback.setsockopt(zmq.RCVHWM, feedback_receive_hwm)
             self.feedback.setsockopt(zmq.MAXMSGSIZE, 65_536)
             self.feedback.setsockopt(zmq.SUBSCRIBE, b"")
             self.feedback.connect(feedback_endpoint)
+            logger.info("XR configured ZMQ queues: command SNDHWM=1, feedback RCVHWM=%d", feedback_receive_hwm)
         except Exception:
             self.close()
             raise
@@ -853,11 +857,13 @@ def main(
     latency_trace_path: str | None = None,
     latency_trace_duration_s: float = 30.0,
     latency_trace_delay_s: float = 0.0,
+    feedback_receive_hwm: int = 8,
 ):
     """Publish bounded joint targets from live measured RoboJuDo feedback.
 
     Args:
         collision_checking: Enable collision avoidance and arm/hand path checks; omitted means disabled.
+        feedback_receive_hwm: Feedback SUB queue limit, from 1 to 16; default 8.
     """
     logging.basicConfig(level=logging.INFO)
     settings = TeleopSettings(
@@ -885,6 +891,7 @@ def main(
         latency_trace_path=latency_trace_path,
         latency_trace_duration_s=latency_trace_duration_s,
         latency_trace_delay_s=latency_trace_delay_s,
+        feedback_receive_hwm=feedback_receive_hwm,
     )
     logger.info("XR collision checking: %s", "enabled" if settings.collision_checking else "disabled")
     logger.info(
