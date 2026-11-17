@@ -12,6 +12,7 @@ import numpy as np
 import tyro
 import zmq
 
+from xrobotoolkit_teleop.common.latency_trace import LatencyTrace, command_stamps, identity
 from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings
 from xrobotoolkit_teleop.ik.registry import BackendName
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
@@ -49,7 +50,14 @@ class RoboJuDoBridge:
         profile=None,
         context=None,
         authoritative_executor=False,
+        observe_all_completions=True,
+        latency_trace_path=None,
+        latency_trace_duration_s=30.0,
+        latency_trace_delay_s=0.0,
     ):
+        self.trace = LatencyTrace(latency_trace_path, latency_trace_duration_s, latency_trace_delay_s)
+        self.observe_all_completions = observe_all_completions
+        self._completion_seen = OrderedDict()
         self.authoritative_executor = authoritative_executor
         self.executor_contract = None
         self.settings = settings
@@ -122,87 +130,109 @@ class RoboJuDoBridge:
                 self._clear_outstanding()
         finally:
             self._resources.close()
+            try:
+                self.trace.export()
+            except OSError:
+                logger.exception("Could not export latency trace")
 
     def _clear_outstanding(self):
         records = list(self._outstanding.values())
         self._outstanding.clear()
         self._completion_records.clear()
+        self._completion_seen.clear()
         for _, transaction, _, _, _ in records:
             self.retargeter.discard_proposal(transaction)
+
+    def _completion_match(self, state, record):
+        positions, _, baseline = record
+        current = (state["session_id"], state["generation"], state["command_id"])
+        if self.authoritative_executor:
+            return current[:2] == baseline[:2]
+        return current == (*baseline[:2], baseline[2] + 1) and positions == state["last_commanded_positions"]
+
+    def _observe_completion_timing(self, state, now):
+        """Observe once without consuming solver transactions or selecting targets."""
+        frame_id = state.get("applied_frame_id")
+        if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
+            return
+        record = self._completion_records.get(frame_id)
+        if record is None or frame_id in self._completion_seen or not self._completion_match(state, record):
+            return
+        self._completion_seen[frame_id] = state["state_id"]
+        while len(self._completion_seen) > 512:
+            self._completion_seen.popitem(last=False)
+        _, sent_at, _ = record
+        if self.trace.enabled:
+            self.trace.record("completion_observed", **identity(state, applied=True), metric_at=now)
+        # Observe hardware completion even if its solver transaction expired.
+        self._record_timing("completion_latency", 1000 * (now - sent_at))
+        self._completion_count += 1
+        # Compare durations only: bridge and robot may run on different hosts.
+        diagnostics = state.get("feedback_diagnostics", {})
+        stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
+        if isinstance(diagnostics, dict):
+            source = diagnostics.get("completion_observation_source")
+            if source in ("idle", "periodic", "before_policy", "after_policy"):
+                self._completion_sources[source] = self._completion_sources.get(source, 0) + 1
+        if isinstance(stamps, dict):
+            # Older robots lack first-publication metadata.
+            publication = "first_feedback_built" if "first_feedback_built" in stamps else "feedback_built"
+            intervals = {
+                "robot_admission": ("received", "hand_submitted"),
+                "executor_validation": ("executor_validation_started", "executor_validation_completed"),
+                "robot_ack_wait": ("acknowledged", publication),
+                "robot_total": ("received", publication),
+                "worker_to_parent": ("worker_completion_ready", "parent_snapshot_received"),
+                "parent_to_ack": ("parent_snapshot_received", "acknowledged"),
+                "arm_submission": ("arm_submission_started", "arm_submission_completed"),
+            }
+            if publication == "first_feedback_built":
+                intervals["feedback_snapshot_lag"] = (publication, "feedback_built")
+            for side in ("left", "right"):
+                intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
+                intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
+                intervals[f"{side}_hand_read"] = (f"{side}_read_started", f"{side}_read_completed")
+                intervals[f"{side}_receipt_to_write"] = ("received", f"{side}_write_completed")
+            for label, (start, end) in intervals.items():
+                try:
+                    duration = 1000 * (_number(stamps[end]) - _number(stamps[start]))
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    continue
+                if duration >= 0:
+                    self._record_timing(label, duration)
+                    if label == "robot_total":
+                        residual = 1000 * (now - sent_at) - duration
+                        if residual >= 0:
+                            self._record_timing("transport_and_poll", residual)
+            try:
+                starts = [
+                    _number(stamps[name])
+                    for name in ("arm_submission_started", "left_write_started", "right_write_started")
+                ]
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+            else:
+                self._record_timing("submission_skew", 1000 * (max(starts) - min(starts)))
+            try:
+                completed = max(_number(stamps[f"{side}_write_completed"]) for side in ("left", "right"))
+                delay = 1000 * (_number(stamps["acknowledged"]) - completed)
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+            else:
+                if delay >= 0:
+                    self._record_timing("completion_observation", delay)
 
     def _observe_completion(self, state, now):
         frame_id = state.get("applied_frame_id")
         if state.get("applied_bridge_id") != self.bridge_id or type(frame_id) is not int:
             return
+        self._observe_completion_timing(state, now)
         record = self._completion_records.pop(frame_id, None)
         if record is None:
             return
-        positions, sent_at, baseline = record
+        positions, _, _ = record
         transaction_record = self._outstanding.pop(frame_id, None)
-        expected = (*baseline[:2], baseline[2] + 1)
-        current = (state["session_id"], state["generation"], state["command_id"])
-        matched = current == expected and positions == state["last_commanded_positions"]
-        if self.authoritative_executor:
-            matched = current[:2] == baseline[:2]
-        if matched:
-            # Observe hardware completion even if its solver transaction expired.
-            self._record_timing("completion_latency", 1000 * (now - sent_at))
-            self._completion_count += 1
-            # Compare durations only: bridge and robot may run on different hosts.
-            diagnostics = state.get("feedback_diagnostics", {})
-            stamps = diagnostics.get("command_timestamps", {}) if isinstance(diagnostics, dict) else {}
-            if isinstance(diagnostics, dict):
-                source = diagnostics.get("completion_observation_source")
-                if source in ("idle", "periodic", "before_policy", "after_policy"):
-                    self._completion_sources[source] = self._completion_sources.get(source, 0) + 1
-            if isinstance(stamps, dict):
-                # Older robots lack first-publication metadata.
-                publication = "first_feedback_built" if "first_feedback_built" in stamps else "feedback_built"
-                intervals = {
-                    "robot_admission": ("received", "hand_submitted"),
-                    "executor_validation": ("executor_validation_started", "executor_validation_completed"),
-                    "robot_ack_wait": ("acknowledged", publication),
-                    "robot_total": ("received", publication),
-                    "worker_to_parent": ("worker_completion_ready", "parent_snapshot_received"),
-                    "parent_to_ack": ("parent_snapshot_received", "acknowledged"),
-                    "arm_submission": ("arm_submission_started", "arm_submission_completed"),
-                }
-                if publication == "first_feedback_built":
-                    intervals["feedback_snapshot_lag"] = (publication, "feedback_built")
-                for side in ("left", "right"):
-                    intervals[f"{side}_hand_queue"] = (f"{side}_submitted", f"{side}_write_started")
-                    intervals[f"{side}_hand_write"] = (f"{side}_write_started", f"{side}_write_completed")
-                    intervals[f"{side}_hand_read"] = (f"{side}_read_started", f"{side}_read_completed")
-                    intervals[f"{side}_receipt_to_write"] = ("received", f"{side}_write_completed")
-                for label, (start, end) in intervals.items():
-                    try:
-                        duration = 1000 * (_number(stamps[end]) - _number(stamps[start]))
-                    except (KeyError, TypeError, ValueError, OverflowError):
-                        continue
-                    if duration >= 0:
-                        self._record_timing(label, duration)
-                        if label == "robot_total":
-                            residual = 1000 * (now - sent_at) - duration
-                            if residual >= 0:
-                                self._record_timing("transport_and_poll", residual)
-                try:
-                    starts = [
-                        _number(stamps[name])
-                        for name in ("arm_submission_started", "left_write_started", "right_write_started")
-                    ]
-                except (KeyError, TypeError, ValueError, OverflowError):
-                    pass
-                else:
-                    self._record_timing("submission_skew", 1000 * (max(starts) - min(starts)))
-                try:
-                    completed = max(_number(stamps[f"{side}_write_completed"]) for side in ("left", "right"))
-                    delay = 1000 * (_number(stamps["acknowledged"]) - completed)
-                except (KeyError, TypeError, ValueError, OverflowError):
-                    pass
-                else:
-                    if delay >= 0:
-                        self._record_timing("completion_observation", delay)
-
+        matched = self._completion_match(state, record)
         try:
             if transaction_record is not None:
                 transaction = transaction_record[1]
@@ -467,9 +497,11 @@ class RoboJuDoBridge:
         """Bound receive/bookkeeping work without sampling XR or issuing commands."""
         latest = None
         invalid_feedback = False
+        completion_snapshots = []
         for _ in range(32):
             try:
                 payload = self.feedback.recv(flags=zmq.NOBLOCK)
+                packet_received_at = time.monotonic()
             except zmq.Again:
                 break
             more = bool(self.feedback.getsockopt(zmq.RCVMORE))
@@ -477,6 +509,7 @@ class RoboJuDoBridge:
             self._multipart = more
             if multipart:
                 continue
+            state = None
             try:
                 if len(payload) > 65_536:
                     raise ValueError("feedback exceeds size limit")
@@ -489,8 +522,31 @@ class RoboJuDoBridge:
                         "valid": state.get("valid"),
                     }
                 self.validate_feedback(state)
+                if self.trace.enabled:
+                    details = state.get("feedback_diagnostics", {})
+                    details = details if isinstance(details, dict) else {}
+                    self.trace.record(
+                        "feedback_received",
+                        at=packet_received_at,
+                        **identity(state, applied=True),
+                        valid=True,
+                        first_ack_state_id=(
+                            details.get("first_ack_state_id")
+                            if type(details.get("first_ack_state_id")) is int
+                            else None
+                        ),
+                        stamps=command_stamps(details.get("command_timestamps")),
+                    )
+                completion_snapshots.append((state, packet_received_at))
                 latest = state
             except (TypeError, ValueError, RecursionError, OverflowError) as exc:
+                if self.trace.enabled:
+                    self.trace.record(
+                        "feedback_received",
+                        at=packet_received_at,
+                        valid=False,
+                        **(identity(state, applied=True) if isinstance(state, dict) else {}),
+                    )
                 latest = None
                 invalid_feedback = True
                 self.status = "hold"
@@ -574,6 +630,10 @@ class RoboJuDoBridge:
                 if value >= 0:
                     self._record_timing(name, value)
         self._expire_outstanding(now)
+        if self.observe_all_completions:
+            for state, received_at in completion_snapshots:
+                if (state["session_id"], state["generation"]) == self._key:
+                    self._observe_completion_timing(state, received_at)
         self._observe_completion(latest, now)
         return latest
 
@@ -746,6 +806,8 @@ class RoboJuDoBridge:
                 return False
             sent_at = time.monotonic()
             self._completion_records[self._frame_id] = (proposal.copy(), sent_at, baseline)
+            if self.trace.enabled:
+                self.trace.record("command_published", at=sent_at, **identity(message), sampled_at=retarget_started)
             if self.authoritative_executor:
                 # Successful desired IK advances solver history, independently of execution.
                 self.retargeter.acknowledge(proposal)
@@ -787,6 +849,10 @@ def main(
     ik_backend: BackendName = BackendName.placo,
     collision_checking: tyro.conf.FlagCreatePairsOff[bool] = False,
     authoritative_executor: bool = False,
+    observe_all_completions: bool = True,
+    latency_trace_path: str | None = None,
+    latency_trace_duration_s: float = 30.0,
+    latency_trace_delay_s: float = 0.0,
 ):
     """Publish bounded joint targets from live measured RoboJuDo feedback.
 
@@ -815,6 +881,10 @@ def main(
         robot=robot,
         ik_backend=ik_backend,
         authoritative_executor=authoritative_executor,
+        observe_all_completions=observe_all_completions,
+        latency_trace_path=latency_trace_path,
+        latency_trace_duration_s=latency_trace_duration_s,
+        latency_trace_delay_s=latency_trace_delay_s,
     )
     logger.info("XR collision checking: %s", "enabled" if settings.collision_checking else "disabled")
     logger.info(

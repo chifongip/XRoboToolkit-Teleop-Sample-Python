@@ -753,6 +753,112 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(self.bridge.poll())
             self.assertEqual(self.bridge._completion_count, 1)
 
+    def test_earliest_received_snapshot_is_timed_without_committing_an_intermediate_solver(self):
+        with patch("time.monotonic", return_value=100.0) as clock:
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            first = copy.deepcopy(self.state)
+            first.update(state_id=2, command_id=1, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=1)
+            second = copy.deepcopy(first)
+            second["state_id"] = 3
+            self.bridge.feedback.messages.extend([first, second])
+
+            # Each packet's receipt is captured before its validation work.
+            def validate(state):
+                clock.return_value += 0.01
+
+            with (
+                patch.object(self.bridge, "validate_feedback", side_effect=validate),
+                patch.object(self.bridge.retargeter, "complete_proposal") as commit,
+            ):
+                latest = self.bridge.receive_feedback()
+            self.assertEqual(latest["state_id"], 3)
+            self.assertEqual(commit.call_count, 1)
+            self.assertEqual(self.bridge._completion_count, 1)
+            self.assertAlmostEqual(self.bridge._timing_ms["completion_latency"], 0.0)
+            self.bridge.receive_feedback()
+            self.assertEqual(self.bridge._completion_count, 1)
+
+    def test_diagnostic_timing_never_consumes_solver_transactions(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+        state = copy.deepcopy(self.state)
+        state.update(state_id=2, command_id=1, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=1)
+        pending = dict(self.bridge._outstanding)
+        with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+            self.bridge._observe_completion_timing(state, 100.01)
+        commit.assert_not_called()
+        self.assertEqual(self.bridge._outstanding, pending)
+        self.assertIn(1, self.bridge._completion_records)
+        self.assertEqual(self.bridge._completion_count, 1)
+
+    def test_multiple_completions_in_batch_only_commit_the_latest_solver_transaction(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            positions = self.bridge._completion_records[1][0]
+            baseline = ("robot", 1, 1)
+            transaction = object()
+            self.bridge._completion_records[2] = (positions, 100.0, baseline)
+            self.bridge._outstanding[2] = (positions, transaction, 100.0, 100.1, baseline)
+            first = copy.deepcopy(self.state)
+            first.update(
+                state_id=2,
+                command_id=1,
+                applied_bridge_id=self.bridge.bridge_id,
+                applied_frame_id=1,
+                last_commanded_positions=positions,
+            )
+            second = copy.deepcopy(first)
+            second.update(state_id=3, command_id=2, applied_frame_id=2)
+            self.bridge.feedback.messages.extend([first, second])
+            with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+                latest = self.bridge.receive_feedback()
+            commit.assert_called_once_with(transaction, positions)
+            self.assertEqual(latest["state_id"], 3)
+            self.assertEqual(self.bridge._completion_count, 2)
+
+    def test_invalid_last_snapshot_does_not_authorize_earlier_completion(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            first = copy.deepcopy(self.state)
+            first.update(state_id=2, command_id=1, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=1)
+            invalid = copy.deepcopy(first)
+            invalid.update(state_id=3, valid=False)
+            self.bridge.feedback.messages.extend([first, invalid])
+            with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+                self.assertFalse(self.bridge.receive_feedback())
+            commit.assert_not_called()
+            self.assertEqual(self.bridge._completion_count, 0)
+
+    def test_receive_budget_exhaustion_does_not_commit_or_count_completions(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            first = copy.deepcopy(self.state)
+            first.update(state_id=2, command_id=1, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=1)
+            self.bridge.feedback.messages.extend([copy.deepcopy(first) for _ in range(32)])
+            with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+                self.assertFalse(self.bridge.receive_feedback())
+            commit.assert_not_called()
+            self.assertEqual(self.bridge._completion_count, 0)
+
+    def test_new_generation_in_batch_discards_old_completion_observations(self):
+        with patch("time.monotonic", return_value=100.0):
+            self.bridge.feedback.messages.append(copy.deepcopy(self.state))
+            self.assertTrue(self.bridge.poll())
+            old = copy.deepcopy(self.state)
+            old.update(state_id=2, command_id=1, applied_bridge_id=self.bridge.bridge_id, applied_frame_id=1)
+            new = copy.deepcopy(self.state)
+            new.update(generation=2, state_id=3)
+            self.bridge.feedback.messages.extend([old, new])
+            with patch.object(self.bridge.retargeter, "complete_proposal") as commit:
+                self.bridge.receive_feedback()
+            commit.assert_not_called()
+            self.assertEqual(self.bridge._completion_count, 0)
+
     def test_first_feedback_metadata_separates_publication_from_later_snapshot(self):
         with patch("time.monotonic", return_value=100.0) as clock:
             self.bridge.feedback.messages.append(copy.deepcopy(self.state))
