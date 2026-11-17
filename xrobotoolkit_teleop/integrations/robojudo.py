@@ -48,7 +48,10 @@ class RoboJuDoBridge:
         ik_backend="placo",
         profile=None,
         context=None,
+        authoritative_executor=False,
     ):
+        self.authoritative_executor = authoritative_executor
+        self.executor_contract = None
         self.settings = settings
         self.xr_client = xr_client
         self._resources = ExitStack()
@@ -57,6 +60,18 @@ class RoboJuDoBridge:
         try:
             self.retargeter = ExternalStateRetargeter(settings, robot=robot, ik_backend=ik_backend, profile=profile)
             self._resources.callback(self.retargeter.close)
+            if authoritative_executor:
+                if not self.retargeter.hand_names:
+                    raise ValueError("authoritative executor requires the combined OmniHand profile")
+                from xrobotoolkit_teleop.common.executor_model import CONTRACT, model_fingerprint
+
+                self.executor_contract = {
+                    "contract": CONTRACT,
+                    "model_fingerprint": model_fingerprint(self.retargeter.profile),
+                    "collision_checking": settings.collision_checking,
+                    "collision_margin": settings.collision_margin,
+                    "collision_trigger": settings.collision_trigger,
+                }
             context = zmq.Context.instance() if context is None else context
             self.commands = context.socket(zmq.PUB)
             self._resources.callback(self.commands.close, linger=0)
@@ -127,6 +142,8 @@ class RoboJuDoBridge:
         expected = (*baseline[:2], baseline[2] + 1)
         current = (state["session_id"], state["generation"], state["command_id"])
         matched = current == expected and positions == state["last_commanded_positions"]
+        if self.authoritative_executor:
+            matched = current[:2] == baseline[:2]
         if matched:
             # Observe hardware completion even if its solver transaction expired.
             self._record_timing("completion_latency", 1000 * (now - sent_at))
@@ -143,6 +160,7 @@ class RoboJuDoBridge:
                 publication = "first_feedback_built" if "first_feedback_built" in stamps else "feedback_built"
                 intervals = {
                     "robot_admission": ("received", "hand_submitted"),
+                    "executor_validation": ("executor_validation_started", "executor_validation_completed"),
                     "robot_ack_wait": ("acknowledged", publication),
                     "robot_total": ("received", publication),
                     "worker_to_parent": ("worker_completion_ready", "parent_snapshot_received"),
@@ -230,10 +248,11 @@ class RoboJuDoBridge:
         if (
             not isinstance(state, dict)
             or type(state.get("schema_version")) is not int
-            or state["schema_version"] != (2 if self.retargeter.hand_names else 1)
+            or state["schema_version"]
+            != (3 if self.authoritative_executor else (2 if self.retargeter.hand_names else 1))
             or state.get("type") != "upper_body_state"
         ):
-            version = 2 if self.retargeter.hand_names else 1
+            version = 3 if self.authoritative_executor else (2 if self.retargeter.hand_names else 1)
             raise ValueError(f"expected upper_body_state schema version {version}")
         if not isinstance(state.get("session_id"), str) or not 1 <= len(state["session_id"]) <= 64:
             raise ValueError("invalid robot session")
@@ -265,7 +284,11 @@ class RoboJuDoBridge:
             raise ValueError("invalid hand command mode")
         if self.retargeter.hand_names and _number(state.get("hand_velocity_limit")) <= 0:
             raise ValueError("invalid positive hand_velocity_limit")
-        if state.get("filter_contract") != "robojudo_filter_v1":
+        if self.authoritative_executor:
+            if state.get("executor") != self.executor_contract or state.get("hand_command_mode") != "direct":
+                raise ValueError("incompatible executor model, collision policy or hand mode")
+        contract = "robojudo_executor_v1" if self.authoritative_executor else "robojudo_filter_v1"
+        if state.get("filter_contract") != contract:
             raise ValueError("incompatible robot filter contract")
         arms = state.get("arm_joint_names")
         if (
@@ -574,9 +597,10 @@ class RoboJuDoBridge:
                 hand_command_mode=latest.get("hand_command_mode", "filtered"),
                 hand_velocity_limit=latest.get("hand_velocity_limit"),
                 streaming=True,
+                authoritative_executor=self.authoritative_executor,
             )
             desired_positions = proposal
-            if proposal is not None:
+            if proposal is not None and not self.authoritative_executor:
                 arms = set(latest["arm_joint_names"])
                 homing = self.retargeter.status == "homing"
                 speeds = {
@@ -686,6 +710,31 @@ class RoboJuDoBridge:
                 "filter_contract": "robojudo_filter_v1",
                 "hand_command_mode": latest.get("hand_command_mode", "filtered"),
             }
+            if self.authoritative_executor:
+                active = [
+                    n
+                    for side, names in self.retargeter.arm_joints.items()
+                    if self.retargeter.active[side]
+                    for n in names
+                ]
+                if self.status == "tracking" and frame is not None:
+                    for side, names in self.retargeter.profile.hands.groups.items():
+                        trigger = frame.triggers.get(side)
+                        if not isinstance(trigger, bool) and isinstance(trigger, Real) and np.isfinite(trigger):
+                            active.extend(names)
+                message.update(
+                    active_joint_names=active,
+                    schema_version=3,
+                    type="upper_body_desired" if proposal is not None else "upper_body_visualization",
+                    filter_contract="robojudo_executor_v1",
+                    executor=self.executor_contract,
+                    velocity_limits={
+                        "arm": self.settings.arm_velocity_limit,
+                        "return": self.settings.return_velocity_limit,
+                        "hand": self.settings.hand_velocity_limit,
+                    },
+                )
+                message.pop("desired_positions")
             if visualize:
                 message["target_poses"] = self.retargeter.target_poses
             self.commands.send_json(
@@ -697,6 +746,12 @@ class RoboJuDoBridge:
                 return False
             sent_at = time.monotonic()
             self._completion_records[self._frame_id] = (proposal.copy(), sent_at, baseline)
+            if self.authoritative_executor:
+                # Successful desired IK advances solver history, independently of execution.
+                self.retargeter.acknowledge(proposal)
+                self._expire_outstanding(time.monotonic())
+                self._proposal_count += 1
+                return True
             self._outstanding[self._frame_id] = (
                 proposal.copy(),
                 self.retargeter.detach_proposal(),
@@ -731,6 +786,7 @@ def main(
     robot: str = "x2",
     ik_backend: BackendName = BackendName.placo,
     collision_checking: tyro.conf.FlagCreatePairsOff[bool] = False,
+    authoritative_executor: bool = False,
 ):
     """Publish bounded joint targets from live measured RoboJuDo feedback.
 
@@ -752,7 +808,14 @@ def main(
     )
     if robot not in PROFILES:
         raise ValueError(f"Unknown robot {robot!r}; choose from {tuple(PROFILES)}")
-    bridge = RoboJuDoBridge(command_endpoint, feedback_endpoint, settings, robot=robot, ik_backend=ik_backend)
+    bridge = RoboJuDoBridge(
+        command_endpoint,
+        feedback_endpoint,
+        settings,
+        robot=robot,
+        ik_backend=ik_backend,
+        authoritative_executor=authoritative_executor,
+    )
     logger.info("XR collision checking: %s", "enabled" if settings.collision_checking else "disabled")
     logger.info(
         "Robot bridge publishing %s, receiving %s; release all grips before engaging",

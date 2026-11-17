@@ -5,15 +5,14 @@ import math
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
-from itertools import product
 from numbers import Real
 
 import numpy as np
 from meshcat import transformations as tf
 
 from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
+from xrobotoolkit_teleop.common.transition_validation import TransitionValidation
 from xrobotoolkit_teleop.ik import create_backend
-from xrobotoolkit_teleop.ik.safety import CollisionPolicy
 from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint, PoseTarget
 from xrobotoolkit_teleop.integrations.robot_profiles import load_profile
 from xrobotoolkit_teleop.utils.collision_checks import CollisionChecker
@@ -42,7 +41,7 @@ class XRFrame:
     triggers: dict = field(default_factory=dict)
 
 
-class ExternalStateRetargeter(CollisionPolicy):
+class ExternalStateRetargeter(TransitionValidation):
     def __init__(self, settings=DEFAULTS, *, robot="x2", ik_backend="placo", profile=None):
         self.settings = settings
         self._resources = ExitStack()
@@ -271,80 +270,6 @@ class ExternalStateRetargeter(CollisionPolicy):
             self.target_poses[side] = local.tolist()
         return True
 
-    def _application_samples(self, start, candidate):
-        samples = self._collision_motion_samples(start, candidate, bool(self.hand_couplings))
-        if not self.hand_names:
-            return samples
-        # Arms and the two hand handles have independent application timing.
-        # Include partial application, not just their synchronized diagonal.
-        groups = []
-        finger_offsets = set()
-        for names in self.profile.hands.groups.values():
-            offsets = {self.robot.get_joint_offset(n) for n in names}
-            offsets.update(passive for passive, source, _ in self.hand_couplings if source in offsets)
-            finger_offsets.update(offsets)
-            groups.append(sorted(offsets))
-        groups.insert(0, sorted(set(range(len(start))) - finger_offsets))
-        paths = [np.unique(np.vstack((start[offsets], samples[:, offsets])), axis=0) for offsets in groups]
-        count = math.prod(len(path) for path in paths)
-        if count > self.MAX_COLLISION_SAMPLES:
-            raise RuntimeError("independent arm/hand motion exceeds sampling budget")
-
-        def configurations():
-            for parts in product(*paths):
-                configuration = start.copy()
-                for offsets, values in zip(groups, parts, strict=True):
-                    configuration[offsets] = values
-                yield configuration
-            # Recovery progress must be assessed at the final target.
-            yield candidate
-
-        return configurations()
-
-    def _validate_motion(self, measured, previous, candidate):
-        if not all(np.isfinite(configuration).all() for configuration in (measured, previous, candidate)):
-            raise RuntimeError("non-finite robot command configuration")
-        if not self.settings.collision_checking:
-            return
-        robot = self.robot
-        try:
-            robot.state.q = measured
-            measured_distances = self.collision_checker.clearances(self.collision_margin)
-            for start in (measured, previous):
-                robot.state.q = start
-                distances = self.collision_checker.clearances(self.collision_margin)
-                floor = np.minimum(np.minimum(distances, measured_distances), self.collision_margin)
-                for configuration in self._application_samples(start, candidate):
-                    robot.state.q = configuration
-                    values = (
-                        self.collision_checker.clearance_bounds(floor)
-                        if self.collision_checker.can_bound and np.all(floor > 0)
-                        else None
-                    )
-                    if values is None or np.any(values < floor):
-                        values = self.collision_checker.clearances(self.collision_margin)
-                    rejected = np.flatnonzero(values < floor - 1e-6)
-                    if rejected.size:
-                        index = rejected[0]
-                        a, b = self.collision_checker.pair_indices[index]
-                        objects = robot.collision_model.objects
-                        raise RuntimeError(
-                            "Robot command path violates self-collision clearance "
-                            f"({objects[a].link} vs {objects[b].link})"
-                        )
-                    if not self.hand_names:
-                        floor = np.maximum(floor, np.minimum(values, self.collision_margin))
-                violating = measured_distances < self.collision_margin - 1e-6
-                if (
-                    start is measured
-                    and np.any(violating)
-                    and not np.any(values[violating] > measured_distances[violating] + 1e-8)
-                ):
-                    raise RuntimeError("Robot collision recovery made no progress")
-        finally:
-            robot.state.q = candidate
-            robot.update_kinematics()
-
     def step(
         self,
         measured_positions,
@@ -356,6 +281,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         hand_command_mode="filtered",
         desired_only=False,
         streaming=False,
+        authoritative_executor=False,
         **kwargs,
     ):
         if self._closed:
@@ -369,6 +295,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                 position_limits,
                 streaming=streaming,
                 desired_only=desired_only,
+                authoritative_executor=authoritative_executor,
                 **kwargs,
             )
         self.reject()
@@ -396,6 +323,7 @@ class ExternalStateRetargeter(CollisionPolicy):
             subset(default_positions),
             subset(position_limits),
             desired_only=desired_only,
+            authoritative_executor=authoritative_executor,
             held_finger_targets={n: previous_targets[n] for n in self.hand_names},
             streaming=streaming,
             **kwargs,
@@ -460,19 +388,22 @@ class ExternalStateRetargeter(CollisionPolicy):
                     lower = np.array([max(position_limits[n][0], hands.limits[n][0]) for n in names])
                     upper = np.array([min(position_limits[n][1], hands.limits[n][1]) for n in names])
                     target = np.clip(trigger * np.array([hands.closed[n] for n in names]), lower, upper)
-                    delta = target - current
-                    moving = np.abs(delta) > 0
-                    fraction = 1.0
-                    speeds = np.array([min(cap, hands.velocities[n]) for n in names])
-                    if moving.any():
-                        fraction = min(1.0, float(np.min(speeds[moving] * dt / np.abs(delta[moving]))))
-                    low32, high32 = _float32_bounds(
-                        np.maximum(lower, current - speeds * dt), np.minimum(upper, current + speeds * dt)
-                    )
-                    values = np.clip((current + fraction * delta).astype(np.float32), low32, high32)
-                    if hand_command_mode == "direct" or desired_only:
-                        low32, high32 = _float32_bounds(lower, upper)
-                        values = np.clip(target.astype(np.float32), low32, high32)
+                    if authoritative_executor:
+                        values = target
+                    else:
+                        delta = target - current
+                        moving = np.abs(delta) > 0
+                        fraction = 1.0
+                        speeds = np.array([min(cap, hands.velocities[n]) for n in names])
+                        if moving.any():
+                            fraction = min(1.0, float(np.min(speeds[moving] * dt / np.abs(delta[moving]))))
+                        low32, high32 = _float32_bounds(
+                            np.maximum(lower, current - speeds * dt), np.minimum(upper, current + speeds * dt)
+                        )
+                        values = np.clip((current + fraction * delta).astype(np.float32), low32, high32)
+                        if hand_command_mode == "direct" or desired_only:
+                            low32, high32 = _float32_bounds(lower, upper)
+                            values = np.clip(target.astype(np.float32), low32, high32)
                     for n, value in zip(names, values, strict=True):
                         candidate[robot.get_joint_offset(n)] = float(value)
 
@@ -481,6 +412,10 @@ class ExternalStateRetargeter(CollisionPolicy):
             if not streaming and not arms_checked and np.array_equal(candidate, previous):
                 self.status = "hold"
                 return None
+            if authoritative_executor:
+                result = {n: float(candidate[robot.get_joint_offset(n)]) for n in self.command_names}
+                self._pending_positions = result.copy()
+                return result
             # Reuse this step's checked arm path only when fingers stayed held.
             # Finger-only proposals always check against the current measurements.
             try:
@@ -503,10 +438,6 @@ class ExternalStateRetargeter(CollisionPolicy):
         finally:
             robot.state.q = saved
             robot.update_kinematics()
-
-    def _project_hands(self, configuration):
-        for passive, source, coefficients in self.hand_couplings:
-            configuration[passive] = np.polynomial.polynomial.polyval(configuration[source], coefficients)
 
     def _collision_constraints(self, previous, offsets):
         """Return arm-space IK constraints; disabled checks never query geometry."""
@@ -543,6 +474,7 @@ class ExternalStateRetargeter(CollisionPolicy):
         desired_only=False,
         held_finger_targets=None,
         streaming=False,
+        authoritative_executor=False,
     ):
         """Return checked float32 positions, or None to retain targets.
 
@@ -588,6 +520,17 @@ class ExternalStateRetargeter(CollisionPolicy):
         # The complete measured-to-command path is still checked independently.
         robot.state.q = previous.copy()
         robot.update_kinematics()
+
+        def checked_candidate(measured, previous, candidate, bounds, previous_targets):
+            if authoritative_executor:
+                if not np.isfinite(candidate).all():
+                    raise RuntimeError("non-finite desired configuration")
+                for n, (low, high) in bounds.items():
+                    offset = robot.get_joint_offset(n)
+                    candidate[offset] = np.clip(candidate[offset], low, high)
+                return candidate
+            return self._checked_candidate(measured, previous, candidate, bounds, previous_targets)
+
         bounds = {}
         homing = intent == "HOME"
         idle = False
@@ -648,8 +591,13 @@ class ExternalStateRetargeter(CollisionPolicy):
             if idle or (self._captured_reference and not homing):
                 # The engagement/recovery frame only anchors the clutch. Do not
                 # let posture regularization change a held target on this frame.
-                candidate = self._quantize(previous.copy(), bounds, previous_targets)
-                self._validate_motion(measured, previous, candidate)
+                candidate = (
+                    previous.copy()
+                    if authoritative_executor
+                    else self._quantize(previous.copy(), bounds, previous_targets)
+                )
+                if not authoritative_executor:
+                    self._validate_motion(measured, previous, candidate)
                 self.status = "tracking"
                 self.hold_reason = None
                 return self._output(candidate)
@@ -669,7 +617,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                 for name, (lower, upper) in bounds.items():
                     candidate[robot.get_joint_offset(name)] = np.clip(default_positions[name], lower, upper)
                 try:
-                    candidate = self._checked_candidate(measured, previous, candidate, bounds, previous_targets)
+                    candidate = checked_candidate(measured, previous, candidate, bounds, previous_targets)
                     self.status = "homing"
                     return self._output(candidate)
                 except RuntimeError:
@@ -707,7 +655,7 @@ class ExternalStateRetargeter(CollisionPolicy):
                     candidate = previous.copy()
                     for name, value in proposal.positions.items():
                         candidate[robot.get_joint_offset(name)] = value
-                    candidate = self._checked_candidate(measured, previous, candidate, bounds, previous_targets)
+                    candidate = checked_candidate(measured, previous, candidate, bounds, previous_targets)
                 except RuntimeError:
                     self.backend.reject(proposal)
                     if attempt:
