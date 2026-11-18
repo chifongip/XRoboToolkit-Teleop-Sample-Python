@@ -1,22 +1,21 @@
 """Profile-driven external-state retargeting; no SDK or physics loop."""
 
 import logging
-import math
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from numbers import Real
 
 import numpy as np
-from meshcat import transformations as tf
 
-from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TrackingReference, validate_tracking_reference
 from xrobotoolkit_teleop.common.transition_validation import TransitionValidation
+from xrobotoolkit_teleop.common.waist_tracking import WaistSample, WaistTracking
 from xrobotoolkit_teleop.ik import create_backend
 from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint, PoseTarget
 from xrobotoolkit_teleop.integrations.robot_profiles import load_profile
 from xrobotoolkit_teleop.utils.collision_checks import CollisionChecker
-from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD
+from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, relative_target, xr_pose_to_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +38,23 @@ class XRFrame:
     grips: dict
     return_to_default: bool = False
     triggers: dict = field(default_factory=dict)
+    waist: WaistSample | None = None
+    waist_error: str | None = None
 
 
 class ExternalStateRetargeter(TransitionValidation):
-    def __init__(self, settings=DEFAULTS, *, robot="x2", ik_backend="placo", profile=None):
+    def __init__(
+        self,
+        settings=DEFAULTS,
+        *,
+        robot="x2",
+        ik_backend="placo",
+        profile=None,
+        tracking_reference: TrackingReference = "fixed-heading",
+    ):
+        validate_tracking_reference(tracking_reference)
+        self.tracking_reference = tracking_reference
+        self.waist_tracking = WaistTracking(settings.tracking_timeout_s)
         self.settings = settings
         self._resources = ExitStack()
         self.backend = None
@@ -52,6 +64,10 @@ class ExternalStateRetargeter(TransitionValidation):
         try:
             description = self._resources.enter_context(load_profile(robot, settings) if profile is None else profile)
             description.validate()
+            if tracking_reference == "waist" and any(
+                group.controller not in {"left_controller", "right_controller"} for group in description.groups.values()
+            ):
+                raise ValueError("waist tracking requires left_controller or right_controller for each group")
             # The robot-owned posture reference changes at runtime. Keep it
             # private so reusing a profile cannot modify another bridge's defaults.
             self.profile = replace(
@@ -163,19 +179,15 @@ class ExternalStateRetargeter(TransitionValidation):
         self.backend.reset()
         self._heading = None
         self._references = {}
+        self.waist_tracking.clear()
         self.active = dict.fromkeys(self.arm_joints, False)
 
     @staticmethod
     def _pose(frame, name):
-        pose = np.asarray(frame.poses.get(name), dtype=float)
-        if pose.shape != (7,) or not np.isfinite(pose).all():
-            raise ValueError(f"invalid XR pose: {name}")
-        norm = math.hypot(*pose[3:])
-        if not math.isfinite(norm) or norm < 1e-6:
-            raise ValueError(f"invalid XR quaternion: {name}")
-        transform = tf.quaternion_matrix(np.roll(pose[3:] / norm, 1))
-        transform[:3, 3] = pose[:3]
-        return transform
+        try:
+            return xr_pose_to_matrix(frame.poses.get(name))
+        except ValueError as exc:
+            raise ValueError(f"{exc}: {name}") from exc
 
     def _fresh(self, frame):
         stamp, now = frame.timestamp_ns, time.monotonic()
@@ -194,18 +206,28 @@ class ExternalStateRetargeter(TransitionValidation):
             self.hold_reason = "XR timestamp stopped advancing; tracking timed out"
         return fresh
 
-    def _tracking_targets(self, frame):
+    def _tracking_targets(self, frame, measured_hands):
         self._idle_tracking = False
         if frame is None:
             self.hold_reason = "XR frame unavailable"
+            self.waist_tracking.invalidate(self.hold_reason)
             self.rebase()
             return False
         if not self._fresh(frame):
+            self.waist_tracking.invalidate(self.hold_reason)
             self.rebase()
             return False
+        relative = None
+        if self.tracking_reference == "waist":
+            relative = self.waist_tracking.update(frame.waist, frame.waist_error)
+            if relative is None:
+                self.hold_reason = self.waist_tracking.reason
+                self.rebase()
+                return False
         grips = [frame.grips.get(key, float("nan")) for key in self.arm_joints]
         if not np.isfinite(grips).all():
             self.hold_reason = "invalid XR grip values"
+            self.waist_tracking.invalidate(self.hold_reason)
             self.rebase()
             return False
         if self._need_release:
@@ -218,14 +240,25 @@ class ExternalStateRetargeter(TransitionValidation):
         self.active = {
             key: value > self.settings.grip_threshold for key, value in zip(self.arm_joints, grips, strict=True)
         }
+        waiting_for_body = False
+        if relative is not None and not self.waist_tracking.can_capture:
+            for side, active in self.active.items():
+                if active and not self.waist_tracking.has_reference(side):
+                    self.active[side] = False
+                    waiting_for_body = True
         if not any(self.active.values()):
             self._idle_tracking = True
-            self.hold_reason = "no grip exceeds the activation threshold"
+            self.hold_reason = (
+                "waiting for a fresh body frame to engage"
+                if waiting_for_body
+                else "no grip exceeds the activation threshold"
+            )
             self._heading = None
             self._references.clear()
+            self.waist_tracking.clear()
             self.backend.reset()
             return False
-        if self._heading is None:
+        if relative is None and self._heading is None:
             forward = -self._pose(frame, self.profile.headset)[:3, 2]
             forward[1] = 0
             if np.linalg.norm(forward) < 1e-6:
@@ -234,24 +267,37 @@ class ExternalStateRetargeter(TransitionValidation):
             up = np.array([0.0, 1.0, 0.0])
             self._heading = R_HEADSET_TO_WORLD @ np.column_stack((np.cross(forward, up), up, -forward)).T
         torso = self.robot.get_T_world_frame(self.profile.reference_frame)
+        torso_inverse = np.linalg.inv(torso)
         for side, group in self.profile.groups.items():
+            joints = frozenset(group.joints)
             if not self.active[side]:
                 # A held-open grip is not a new release on every frame. In
                 # LeRobot a reset also invalidates the other arm's warm start.
-                if self._references.pop(side, None) is not None:
-                    self.backend.reset(frozenset(group.joints))
+                released = (
+                    self.waist_tracking.release(side)
+                    if relative is not None
+                    else self._references.pop(side, None) is not None
+                )
+                if released:
+                    self.backend.reset(joints)
                 continue
-            controller = self._pose(frame, group.controller)
-            if side not in self._references:
-                self.backend.reset(frozenset(group.joints))
-                hand = np.linalg.inv(torso) @ self.robot.get_T_world_frame(self.profile.groups[side].frame)
-                self._references[side] = (controller.copy(), hand)
-                self._captured_reference = True
-            reference, hand = self._references[side]
-            local = hand.copy()
-            local[:3, 3] += self.settings.scale_factor * self._heading @ (controller[:3, 3] - reference[:3, 3])
-            delta = self._heading @ controller[:3, :3] @ reference[:3, :3].T @ self._heading.T
-            local[:3, :3] = delta @ hand[:3, :3]
+            if relative is not None:
+                hand = None
+                if not self.waist_tracking.has_reference(side):
+                    self.backend.reset(joints)
+                    self._captured_reference = True
+                    hand = measured_hands[side]
+                controller = relative[group.controller.removesuffix("_controller")]
+                local = self.waist_tracking.target(side, controller, hand, self.settings.scale_factor)
+            else:
+                controller = self._pose(frame, group.controller)
+                if side not in self._references:
+                    self.backend.reset(joints)
+                    hand = torso_inverse @ self.robot.get_T_world_frame(group.frame)
+                    self._references[side] = (controller.copy(), hand)
+                    self._captured_reference = True
+                reference, hand = self._references[side]
+                local = relative_target(controller, reference, hand, self._heading, self.settings.scale_factor)
             self.tasks[side].T_world_frame = torso @ local
             self.target_poses[side] = local.tolist()
         return True
@@ -322,6 +368,7 @@ class ExternalStateRetargeter(TransitionValidation):
                 or frame is None
                 or frame.return_to_default
                 or self._need_release
+                or (self.tracking_reference == "waist" and not self.waist_tracking.valid)
                 or not self._fresh(frame)
             ):
                 return None
@@ -492,6 +539,13 @@ class ExternalStateRetargeter(TransitionValidation):
         if self.collision_checker is not None:
             self.collision_checker.clear_cache()
         measured = robot.state.q.copy()
+        measured_hands = {}
+        if intent == "TRACK" and self.tracking_reference == "waist":
+            measured_torso_inverse = np.linalg.inv(robot.get_T_world_frame(self.profile.reference_frame))
+            measured_hands = {
+                side: measured_torso_inverse @ robot.get_T_world_frame(group.frame)
+                for side, group in self.profile.groups.items()
+            }
         previous = measured.copy()
         for name in self.arm_names:
             if not np.isfinite(previous_targets[name]):
@@ -533,7 +587,7 @@ class ExternalStateRetargeter(TransitionValidation):
                         self.rebase()
                         return None
                     homing = True
-                elif not self._tracking_targets(frame):
+                elif not self._tracking_targets(frame, measured_hands):
                     # Apply the same limits, quantization, and path checks to idle frames.
                     if not (streaming and self._idle_tracking):
                         return None

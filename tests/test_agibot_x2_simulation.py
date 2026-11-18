@@ -142,7 +142,7 @@ class X2SimulationTests(unittest.TestCase):
                     if force_avoidance:
                         self.assertGreater(avoid.call_count, 0)
 
-    def test_return_to_default_holds_on_tracking_loss_and_collision(self):
+    def test_return_to_default_requires_live_xr_but_ignores_tracking_poses(self):
         c = self.make_controller()
         c.xr_client.buttons["Y"] = True
         held = c.mj_data.ctrl.copy()
@@ -150,18 +150,16 @@ class X2SimulationTests(unittest.TestCase):
             c.step_control()
         self.assertFalse(c._ik_valid)
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
-        c.xr_client.poses["left_controller"][0] = np.nan
+        c.xr_client.poses.clear()
         c.step_control()
-        self.assertFalse(c._ik_valid)
-        np.testing.assert_array_equal(c.mj_data.ctrl, held)
-        c.xr_client.poses["left_controller"][0] = 0.0
+        self.assertTrue(c._ik_valid)
         with patch.object(c, "_validate_collision_motion", side_effect=RuntimeError("blocked")) as check:
             c.step_control()
         self.assertGreater(check.call_count, 0)
         self.assertFalse(c._ik_valid)
         np.testing.assert_array_equal(c.mj_data.ctrl, held)
 
-    def test_return_release_rebases_gripped_controllers(self):
+    def test_return_requires_grip_release_before_rebasing(self):
         c = self.make_controller()
         c.xr_client.grips.update(left_grip=1.0, right_grip=1.0)
         c.step_control()
@@ -170,6 +168,13 @@ class X2SimulationTests(unittest.TestCase):
         c.step_control()
         self.assertIsNone(c.ref_controller_xyz["left_arm"])
         c.xr_client.buttons["Y"] = False
+        held = c.mj_data.ctrl.copy()
+        c.step_control()
+        np.testing.assert_array_equal(c.mj_data.ctrl, held)
+        self.assertIsNone(c.ref_controller_xyz["left_arm"])
+        c.xr_client.grips.update(left_grip=0.0, right_grip=0.0)
+        c.step_control()
+        c.xr_client.grips["left_grip"] = 1.0
         c.step_control()
         xyz, quat = c._get_link_pose("left_hand_center")
         np.testing.assert_allclose(c.effector_task["left_arm"].T_world_frame[:3, 3], xyz, atol=0.003)

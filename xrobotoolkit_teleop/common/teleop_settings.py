@@ -2,6 +2,15 @@
 
 import math
 from dataclasses import dataclass
+from typing import Literal, get_args
+
+
+TrackingReference = Literal["fixed-heading", "waist"]
+
+
+def validate_tracking_reference(mode):
+    if mode not in get_args(TrackingReference):
+        raise ValueError("tracking_reference must be fixed-heading or waist")
 
 
 @dataclass(frozen=True)

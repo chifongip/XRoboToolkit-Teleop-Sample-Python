@@ -28,3 +28,28 @@ session/generation changes; logging does not gate command execution.
 
 RTT does not establish physical arrival or firmware acceptance. One-way publication-to-receipt latency requires
 synchronized clocks and is not reported. These summaries replace the local bridge loop-processing latency log.
+
+In either tracking mode, holding the XR HOME button requires a live XR timestamp
+stream. HOME holds the fingers and clears the arm clutch references. Release both
+grips before resuming teleoperation. A robot-requested HOME can run with XR offline.
+
+## Waist-relative reference
+
+Both X2 profiles support `--tracking-reference waist` (default: `fixed-heading`):
+
+```bash
+python -m xrobotoolkit_teleop.integrations.robojudo --tracking-reference waist
+```
+
+Complete PICO's native full-body calibration before starting. No extra calibration
+file or SDK changes are required. See the [X2 reference behavior, tracking checks,
+and diagnostic instructions](agibot_x2.md#waist-relative-reference). Waist mode
+checks both the top-level XR packet timestamp and body-frame freshness.
+
+Waist mode changes bridge retargeting only. Schema version 3, torso-relative
+visualization, robot-owned execution, limits, and collision policy remain unchanged.
+Startup, bridge restart, and robot generation changes require grip release
+before engagement. Waist loss stops desired tracking commands; RoboJuDo's existing
+hold/timeout behavior applies, so physical settling is not instantaneous. Recovery
+captures fresh references without replaying outage motion. Physical robot
+qualification remains pending.

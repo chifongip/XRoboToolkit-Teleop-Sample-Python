@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import meshcat.transformations as tf
 
@@ -127,3 +129,24 @@ def apply_delta_pose(
     target_rot = tf.quaternion_multiply(rot_delta_quat, source_rot)
 
     return target_pos, target_rot
+
+
+def xr_pose_to_matrix(pose):
+    """Convert a finite native XR [xyz, xyzw] pose to a rigid transform."""
+    pose = np.asarray(pose, dtype=float)
+    if pose.shape != (7,) or not np.isfinite(pose).all():
+        raise ValueError("invalid XR pose")
+    norm = math.hypot(*pose[3:])
+    if not np.isfinite(norm) or norm < 1e-6:
+        raise ValueError("invalid XR quaternion")
+    result = tf.quaternion_matrix(np.roll(pose[3:] / norm, 1))
+    result[:3, 3] = pose[:3]
+    return result
+
+
+def relative_target(controller, reference, hand, axes, scale):
+    """Apply controller translation and rotation deltas without rotating hand position."""
+    target = hand.copy()
+    target[:3, 3] += scale * axes @ (controller[:3, 3] - reference[:3, 3])
+    target[:3, :3] = axes @ controller[:3, :3] @ reference[:3, :3].T @ axes.T @ hand[:3, :3]
+    return target

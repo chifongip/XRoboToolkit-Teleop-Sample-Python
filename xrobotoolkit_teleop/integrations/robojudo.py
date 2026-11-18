@@ -13,7 +13,8 @@ import numpy as np
 import tyro
 import zmq
 
-from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings, TrackingReference
+from xrobotoolkit_teleop.common.waist_tracking import read_waist_sample
 from xrobotoolkit_teleop.ik.registry import BackendName
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
 from xrobotoolkit_teleop.integrations.robot_profiles import PROFILES
@@ -96,6 +97,7 @@ class RoboJuDoBridge:
         robot="x2",
         ik_backend="placo",
         profile=None,
+        tracking_reference: TrackingReference = "fixed-heading",
         context=None,
     ):
         from xrobotoolkit_teleop.common.executor_model import CONTRACT, model_fingerprint
@@ -120,7 +122,11 @@ class RoboJuDoBridge:
             self._resources.callback(xr_client.close)
         try:
             self.retargeter = ExternalStateRetargeter(
-                self.settings, robot=robot, ik_backend=ik_backend, profile=profile
+                self.settings,
+                robot=robot,
+                ik_backend=ik_backend,
+                profile=profile,
+                tracking_reference=tracking_reference,
             )
             self._resources.callback(self.retargeter.close)
             self._model_identity = {
@@ -245,24 +251,30 @@ class RoboJuDoBridge:
 
     def _xr_frame(self):
         if self.xr_client is None:
-            # HOME is independent of headset/PC Service availability.
+            # Robot-requested HOME bypasses XR sampling.
             from xrobotoolkit_teleop.common.xr_client import XrClient
 
             self.xr_client = XrClient()
             self._resources.callback(self.xr_client.close)
         xr = self.xr_client
         profile = self.retargeter.profile
-        devices = {profile.headset, *(group.controller for group in profile.groups.values())}
-        frame = XRFrame(
-            timestamp_ns=xr.get_timestamp_ns(),
+        if xr.get_button_state_by_name(profile.home_button):
+            return XRFrame(timestamp_ns=xr.get_timestamp_ns(), poses={}, grips={}, return_to_default=True)
+        waist_mode = self.retargeter.tracking_reference == "waist"
+        waist, waist_error = read_waist_sample(xr) if waist_mode else (None, None)
+        devices = set() if waist_mode else {profile.headset, *(group.controller for group in profile.groups.values())}
+        return XRFrame(
+            timestamp_ns=waist.xr_timestamp_ns if waist is not None else xr.get_timestamp_ns(),
+            waist=waist,
+            waist_error=waist_error,
             poses={name: xr.get_pose_by_name(name) for name in devices},
             grips={key: xr.get_key_value_by_name(group.grip) for key, group in profile.groups.items()},
-            return_to_default=xr.get_button_state_by_name(profile.home_button),
-            triggers={}
-            if profile.hands is None
-            else {side: xr.get_key_value_by_name(f"{side}_trigger") for side in profile.hands.groups},
+            triggers=(
+                {}
+                if profile.hands is None
+                else {side: xr.get_key_value_by_name(f"{side}_trigger") for side in profile.hands.groups}
+            ),
         )
-        return frame
 
     def poll(self):
         try:
@@ -416,6 +428,7 @@ def main(
     return_velocity_limit: float = DEFAULTS.return_velocity_limit,
     robot: str = "x2",
     ik_backend: BackendName = BackendName.placo,
+    tracking_reference: TrackingReference = "fixed-heading",
 ):
     """Publish bounded joint targets from live measured RoboJuDo feedback."""
     logging.basicConfig(level=logging.INFO)
@@ -432,7 +445,9 @@ def main(
         settings,
         robot=robot,
         ik_backend=ik_backend,
+        tracking_reference=tracking_reference,
     )
+    logger.info("Tracking reference: %s", tracking_reference)
     logger.info(
         "Robot bridge publishing %s, receiving %s; release all grips before engaging",
         command_endpoint,

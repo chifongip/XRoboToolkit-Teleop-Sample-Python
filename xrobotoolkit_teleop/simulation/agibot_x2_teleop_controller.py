@@ -12,7 +12,8 @@ from meshcat import transformations as tf
 from mujoco import viewer as mj_viewer
 from numpy.polynomial.polynomial import polyval
 
-from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TrackingReference, validate_tracking_reference
+from xrobotoolkit_teleop.common.waist_tracking import WaistTracking, read_waist_sample
 from xrobotoolkit_teleop.common.xr_client import XrClient
 from xrobotoolkit_teleop.ik import BACKENDS, create_backend
 from xrobotoolkit_teleop.ik.safety import CollisionPolicy
@@ -43,7 +44,12 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
         return_velocity_limit=DEFAULTS.return_velocity_limit,
         ik_backend="placo",
         visualize_ik=False,
+        tracking_reference: TrackingReference = "fixed-heading",
     ):
+        validate_tracking_reference(tracking_reference)
+        self.tracking_reference = tracking_reference
+        self.waist_tracking = WaistTracking(self.XR_TRACKING_TIMEOUT_S)
+        self._need_grip_release = tracking_reference == "waist"
         ik_backend = getattr(ik_backend, "value", ik_backend)
         if ik_backend not in BACKENDS:
             raise ValueError(f"ik_backend must be one of {tuple(BACKENDS)}")
@@ -381,12 +387,33 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
         stream_fresh = self._xr_stream_is_fresh()
         self._stream_fresh = stream_fresh
         if self.xr_client.get_button_state_by_name("Y"):
-            self._heading_captured = False
             self._update_return_to_default(stream_fresh)
             return
+        grips_valid = True
         for name, config in self.manipulator_config.items():
             grip = self.xr_client.get_key_value_by_name(config["control_trigger"])
+            grips_valid = grips_valid and np.isfinite(grip)
             self.active[name] = np.isfinite(grip) and grip > DEFAULTS.grip_threshold
+        if self.tracking_reference == "waist":
+            targets_ready = self._update_waist_targets(stream_fresh, grips_valid)
+        elif self._waiting_for_grip_release(grips_valid):
+            return
+        else:
+            targets_ready = self._update_fixed_targets(stream_fresh)
+        if not targets_ready:
+            return
+        measured = self.robot.state.q.copy()
+        try:
+            self._propose_checked(measured, self._command_bounds())
+            self._ik_valid = True
+            self.status = "tracking"
+        except (RuntimeError, ValueError) as exc:
+            self.robot.state.q = measured
+            self.robot.update_kinematics()
+            self.status = f"hold: {exc}"
+            print(f"X2 IK failed; holding previous commands: {exc}")
+
+    def _update_fixed_targets(self, stream_fresh):
         any_active = any(self.active.values())
         if not any_active:
             self._heading_captured = False
@@ -413,29 +440,80 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
             for name in self.manipulator_config:
                 self._reset_clutch_reference(name)
             self.backend.reset()
-            return
+            return False
         if not any_active:
             self.backend.reset()
-            return
-        measured = self.robot.state.q.copy()
-        try:
-            self._propose_checked(measured, self._command_bounds())
-            self._ik_valid = True
+            return False
+        return True
+
+    def _update_waist_targets(self, stream_fresh, grips_valid):
+        if not stream_fresh:
+            relative = self.waist_tracking.invalidate("XR stream timed out")
+        else:
+            sample, error = read_waist_sample(self.xr_client)
+            relative = self.waist_tracking.update(sample, error)
+            if relative is not None and not grips_valid:
+                relative = self.waist_tracking.invalidate("invalid XR grip values")
+        if relative is None:
+            self._stream_fresh = False
+            self.active = dict.fromkeys(self.active, False)
+            self.backend.reset()
+            self.status = f"hold: {self.waist_tracking.reason}"
+            return False
+        if self._waiting_for_grip_release(grips_valid):
+            return False
+        torso = self.robot.get_T_world_frame("torso_link")
+        torso_inverse = np.linalg.inv(torso)
+        captured = False
+        waiting_for_body = False
+        for name, config in self.manipulator_config.items():
+            if not self.active[name]:
+                if self.waist_tracking.release(name):
+                    self.backend.reset(frozenset(self.arm_joints[name]))
+                continue
+            hand = None
+            if not self.waist_tracking.has_reference(name):
+                if not self.waist_tracking.can_capture:
+                    self.active[name] = False
+                    waiting_for_body = True
+                    continue
+                captured = True
+                self.backend.reset(frozenset(self.arm_joints[name]))
+                hand = torso_inverse @ self.robot.get_T_world_frame(config["link_name"])
+            controller = relative[config["pose_source"].removesuffix("_controller")]
+            local = self.waist_tracking.target(name, controller, hand, self.scale_factor)
+            self.effector_task[name].T_world_frame = torso @ local
+        # The capture frame holds existing arm commands.
+        any_active = any(self.active.values())
+        if any_active:
             self.status = "tracking"
-        except (RuntimeError, ValueError) as exc:
-            self.robot.state.q = measured
-            self.robot.update_kinematics()
-            self.status = f"hold: {exc}"
-            print(f"X2 IK failed; holding previous commands: {exc}")
+        else:
+            self.status = (
+                "waiting for a fresh body frame to engage" if waiting_for_body else "waiting for grip engagement"
+            )
+        return any_active and not captured
+
+    def _waiting_for_grip_release(self, grips_valid):
+        if not self._need_grip_release:
+            return False
+        if self._stream_fresh and grips_valid and not any(self.active.values()):
+            self._need_grip_release = False
+            return False
+        self._stream_fresh = False
+        self.active = dict.fromkeys(self.active, False)
+        self.status = "hold: release all grips before engaging"
+        return True
 
     def _update_return_to_default(self, stream_fresh):
+        self._stream_fresh = False  # Hold finger commands during HOME.
+        self._heading_captured = False
+        self.waist_tracking.clear()
+        self._need_grip_release = True
         self.backend.reset()
         for name in self.manipulator_config:
             self.active[name] = True
             self._reset_clutch_reference(name)
-        if not stream_fresh or any(
-            self._read_valid_xr_pose(config["pose_source"]) is None for config in self.manipulator_config.values()
-        ):
+        if not stream_fresh:
             return
         previous = self.robot.state.q.copy()
         home = self.mj_model.key("home").qpos
@@ -701,10 +779,14 @@ class AgibotX2TeleopController(CollisionPolicy, X2MujocoRuntime):
                 viewer.cam.elevation = -15
                 viewer.cam.distance = 2.5
                 viewer.cam.lookat = [0, 0, 0.7]
+                last_status = None
                 while viewer.is_running() and not self._stop_event.is_set():
                     start = time.monotonic()
                     with viewer.lock():
                         self.step_control()
+                    if self.tracking_reference == "waist" and self.status != last_status:
+                        print(f"X2 waist: {self.status}")
+                        last_status = self.status
                     viewer.sync(state_only=True)
                     time.sleep(max(0.0, self.dt - (time.monotonic() - start)))
         except KeyboardInterrupt:

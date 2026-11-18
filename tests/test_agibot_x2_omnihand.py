@@ -46,6 +46,7 @@ class X2OmnihandProTests(unittest.TestCase):
             c.mj_data.ctrl[actuator] -= 0.1
         mujoco.mj_forward(c.mj_model, c.mj_data)
         c.xr_client.buttons["Y"] = True
+        c.xr_client.grips.update(left_trigger=1.0, right_trigger=1.0)
         arms = list(c.arm_actuators)
         for _ in range(60):
             previous = c.mj_data.ctrl.copy()

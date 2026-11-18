@@ -33,5 +33,6 @@ class ZmqOptionTests(unittest.TestCase):
                 "return_velocity_limit",
                 "robot",
                 "ik_backend",
+                "tracking_reference",
             },
         )

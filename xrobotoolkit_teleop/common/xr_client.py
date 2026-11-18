@@ -1,5 +1,11 @@
+import time
+from typing import TYPE_CHECKING
+
 import numpy as np
 import xrobotoolkit_sdk as xrt
+
+if TYPE_CHECKING:
+    from xrobotoolkit_teleop.common.waist_tracking import WaistSample
 
 
 class XrClient:
@@ -134,7 +140,7 @@ class XrClient:
         """Returns complete body tracking data or None if unavailable.
 
         Returns:
-            Dict with keys: 'poses', 'velocities', 'accelerations', 'imu_timestamps', 'body_timestamp'
+            Dict with keys: 'poses', 'velocities', 'accelerations'
             - poses: (24, 7) array [x,y,z,qx,qy,qz,qw] for each joint
             - velocities: (24, 6) array [vx,vy,vz,wx,wy,wz] for each joint
             - accelerations: (24, 6) array [ax,ay,az,wax,way,waz] for each joint
@@ -147,6 +153,57 @@ class XrClient:
             "velocities": xrt.get_body_joints_velocity(),
             "accelerations": xrt.get_body_joints_acceleration(),
         }
+
+    def get_pelvis_timestamp_ns(self) -> int:
+        """Return the SDK's per-joint timestamp for the pelvis (body joint 0)."""
+        return xrt.get_body_joints_timestamp()[0]
+
+    @staticmethod
+    def _body_frame_timestamps():
+        try:
+            aggregate = xrt.get_body_timestamp_ns()
+        except (AttributeError, RuntimeError):
+            aggregate = None
+        try:
+            head = xrt.get_body_joints_timestamp()[15]
+        except (AttributeError, IndexError, RuntimeError, TypeError):
+            head = None
+        return (aggregate if type(aggregate) is int else None, head if type(head) is int else None)
+
+    def get_waist_sample(self) -> "WaistSample":
+        """Best-effort stable read using the unmodified SDK's public getters.
+
+        Bracket pose reads with packet and body timestamps. The SDK can
+        retain cached fields, so this does not guarantee an atomic snapshot.
+        """
+        from xrobotoolkit_teleop.common.waist_tracking import WaistSample
+
+        for _ in range(3):
+            observed_at = time.monotonic()
+            if not xrt.is_body_data_available():
+                raise ValueError("body tracking unavailable")
+            before = xrt.get_time_stamp_ns()
+            body_before = self._body_frame_timestamps()
+            body = np.asarray(xrt.get_body_joints_pose(), dtype=float)
+            controllers = {
+                side: np.asarray(self.get_pose_by_name(f"{side}_controller"), dtype=float).copy()
+                for side in ("left", "right")
+            }
+            body_after = self._body_frame_timestamps()
+            after = xrt.get_time_stamp_ns()
+            if before == after and body_before == body_after and xrt.is_body_data_available():
+                if body.shape != (24, 7):
+                    raise ValueError("invalid body pose array")
+                return WaistSample(
+                    pelvis_pose=body[0].copy(),
+                    controllers=controllers,
+                    body_timestamp_ns=body_before[0],
+                    xr_timestamp_ns=before,
+                    observed_at=observed_at,
+                    hip_positions=body[1:3, :3].copy(),  # PICO body joints: left hip, right hip.
+                    body_head_timestamp_ns=body_before[1],
+                )
+        raise ValueError("XR packet or body timestamps changed during waist sample read")
 
     def close(self):
         xrt.close()

@@ -76,10 +76,13 @@ python scripts/simulation/teleop_agibot_x2_mujoco.py
 
 The bundled X2 v1.3.0 model keeps the pelvis, legs, waist, and head fixed. Hold
 the left or right **grip** to control the corresponding hand center's position and
-orientation using controller motion in a fixed frame aligned to your forward
-heading when the first grip engages.
-Moving your head alone leaves the hand targets unchanged. Turning your body
-while gripping moves the targets if it changes the controllers' world poses.
+orientation. The default `--tracking-reference fixed-heading` uses a fixed frame
+aligned to your forward heading when the first grip engages. Use
+[`--tracking-reference waist`](#waist-relative-reference) to compensate shared
+waist and controller motion instead.
+Moving your head alone leaves the hand targets unchanged. In the default mode,
+turning your body while gripping moves the targets if it changes the controllers'
+world poses.
 Release to hold its last joint command; press again to start from
 the current controller pose. Both arms can move simultaneously.
 
@@ -88,10 +91,10 @@ current joint commands. This overrides the arm grips while held and respects
 a separate joint target speed limit of **1.0 rad/s** (about 57 degrees/s), bounded by
 the arm and URDF limits. Set `--return-velocity-limit 0.25` for a slower return.
 When a direct step is blocked, a collision-constrained posture solve seeks
-clearance around the obstacle. Every step still passes collision checks; motion
-pauses if tracking is lost or no safe step is found. Controller motion rebases
-when Y is released.
-Omnihand fingers remain under trigger control.
+clearance around the obstacle. HOME requires a live XR stream and uses the
+robot's measured state and collision checks. Controller, headset, and pelvis
+poses are unused. Omnihand fingers hold during HOME. Release both grips after
+HOME to resume tracking.
 
 To attach both Omnihand Pro hands, use:
 
@@ -199,9 +202,9 @@ moving joint, keeping the thumb and fingers coordinated during reversals.
 This bounds commanded speeds, not actual physics velocities; passive
 fingers still follow their coupling constraints and have no separate speed clamp.
 Control requires an advancing XR stream timestamp. If it stops advancing for
-250 ms, joint commands hold and clutch references reset; tracking recovery starts
-from the measured hand-center poses. Omnihand Pro commands also hold during stream outages;
-fresh packets resume trigger control. Non-finite trigger values hold only the
+250 ms, joint commands hold and clutch references reset. Omnihand Pro commands
+hold during stream outages and resume trigger control when fresh packets arrive.
+Non-finite trigger values hold only the
 affected hand, and finite values are clamped to the trigger's 0–1 range.
 The SDK exposes a shared stream timestamp, so
 this watchdog detects stream outages, not individual devices dropping out while
@@ -209,8 +212,10 @@ other packets continue arriving. Invalid active controller poses also hold
 both arms' commands and reset both clutch references, so recovery discards
 controller motion made during the hold.
 
-When the first grip engages, the headset's forward direction projected onto the
-horizontal plane sets the control heading. Look forward at engagement. This
+### Fixed-heading reference
+
+When the first grip engages in `fixed-heading` mode, the headset's forward direction
+projected onto the horizontal plane sets the control heading. Look forward at engagement. This
 heading stays fixed while either grip is held: later head translation, pitch,
 roll, or yaw cannot shift targets. Both arms share the same heading even if their
 grips engage at different times. Release **both grips** before repositioning;
@@ -225,12 +230,86 @@ Tracking outages rebase controller deltas but preserve the locked session headin
 
 The XR adapter expects native PICO tracking-world coordinates: +X right, +Y up,
 +Z backward, with poses `[x, y, z, qx, qy, qz, qw]` and positions in meters.
-The session heading is removed before the fixed basis conversion
+In `fixed-heading` mode, the session heading is removed before the fixed basis
+conversion
 `[robot_x, robot_y, robot_z] = [-vr_z, -vr_x, vr_y]`. Rotations use the same
 basis change. Robot coordinates are +X forward, +Y left, +Z up.
 Clutching preserves the hand's initial orientation and applies controller
 rotation changes, rather than imposing its absolute pose. Headset position is
 not needed because controller translation is already measured from engagement.
+
+### Waist-relative reference
+
+Enable and calibrate PICO full-body tracking, then run:
+
+```bash
+python scripts/simulation/teleop_agibot_x2_mujoco.py --tracking-reference waist
+```
+
+PICO's native tracker calibration is sufficient; no additional calibration file or
+SDK modification is required. This mode uses the estimated pelvis (joint 0), not
+an individual tracker selected by serial number. It also supports `--with-omnihand`.
+The simulated robot's waist remains fixed.
+
+When the operator's waist and controllers move together, robot hand targets stay
+unchanged relative to the robot torso. Compensation includes translation, yaw,
+pitch, and roll. Moving only the waist beneath room-stationary hands changes
+those targets. Head pose is unused.
+
+The first grip engagement sets the pelvis-to-robot control axes for the session.
+The right-to-left hip line defines left in the pelvis frame. The calibrated
+pelvis joint supplies up, and forward is perpendicular to both. The same
+pelvis-relative reach maps to the same robot direction across starting headings
+and leans.
+Both arms share the mapping through turns, grip releases, HOME, and tracking
+recovery. Each grip engagement waits for a new body frame, captures the
+pelvis-relative controller pose, and anchors the target at the measured robot
+hand pose. Restart to set the axes again. Translation scale applies to relative
+displacement. Rotation deltas change hand orientation around the hand center.
+
+Release both grips after startup, then engage independently. Release an
+arm's grip to reposition that controller without moving its target. Triggers work
+independently during normal tracking. Waist tracking faults hold both arms and
+fingers and clear references. Recovery waits for the XR packet and body frame
+timestamps to advance, then captures fresh references. Engagement and recovery
+frames hold existing arm commands. Change modes by restarting.
+
+The adapter brackets pose reads with the XR packet timestamp and the body
+timestamps, retrying up to three times. The packet timestamp and a body frame
+timestamp must each advance within 250 ms. If the aggregate timestamp is
+missing or zero, the timestamp on joint 15 of the body skeleton is used.
+That timestamp stayed frozen when the headset repeated a cached skeleton while
+continuing to stream controllers. Repeated body frames hold the last
+pelvis-relative targets until a new body frame arrives or the timeout expires.
+Rollback clears references.
+Per-sample jumps above 0.5 m or 1 rad in raw or pelvis-relative poses also hold
+control. A gap between valid
+samples longer than the timeout also clears the clutch references.
+
+Record tracking data without commanding a robot:
+
+```bash
+python scripts/misc/diagnose_x2_waist.py --duration 30 --rate 50 > /tmp/x2-waist-recording.jsonl
+```
+
+The diagnostic records poses, timestamps, observed update rates,
+relative transforms, and hold reasons. Compare the separately read
+`pelvis_timestamp_ns` and `pelvis_observed_update_hz` with the aggregate
+`sample.body_timestamp_ns` and the first entry of `observed_update_hz`.
+The capture also reports `sample.body_head_timestamp_ns`. The hold reason
+identifies an XR packet or body-frame timeout. Non-finite values become JSON null,
+and SDK initialization may also print status lines. Record standing, head-only motion,
+walking, turning, bending, and independent hand motion to assess residual motion
+and pelvis/head coupling.
+
+The SDK can retain old fields while the packet timestamp advances. The checks
+detect a frozen full-body frame. Bracketed reads cannot independently verify
+each joint or controller's freshness, guarantee synchronized poses, or detect
+every tracking-origin reset. Local observation times are not packet arrival times.
+Read-only headset captures validated the timestamp checks. Physical robot
+qualification remains pending.
+
+### Coordinate conventions and simulation limits
 
 The upstream PC Service README inconsistently labels headset and controller
 handedness. The [Unity sender](https://github.com/XR-Robotics/XRoboToolkit-Unity-Client/blob/main/Assets/Scripts/TrackingData.cs)

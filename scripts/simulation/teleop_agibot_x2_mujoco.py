@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import tyro
-from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS
+from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TrackingReference
 from xrobotoolkit_teleop.ik import BackendName
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import (
     AgibotX2TeleopController,
@@ -26,8 +26,9 @@ def main(
     return_velocity_limit: float = DEFAULTS.return_velocity_limit,
     ik_backend: BackendName = BackendName.placo,
     visualize_ik: bool = False,
+    tracking_reference: TrackingReference = "fixed-heading",
 ):
-    """Hold a grip to move its hand center; release both grips to reset the control heading.
+    """Hold a grip to move its hand center using the selected tracking reference.
 
     Args:
         xml_path: MuJoCo scene with fixed body and 14 arm position actuators.
@@ -42,6 +43,7 @@ def main(
         with_omnihand: Use the bundled X2 + Omnihand Pro scene; triggers open/close hands.
         control_frequency: Target control frequency in Hz; default 50. Physics steps fit each control period.
         ik_backend: Registered IK method; every backend enforces velocity and collision constraints.
+        tracking_reference: Fixed heading from the headset or pelvis-relative tracking.
     """
     if not math.isfinite(scale_factor) or scale_factor <= 0:
         raise ValueError("scale_factor must be finite and positive")
@@ -64,13 +66,19 @@ def main(
         return_velocity_limit=return_velocity_limit,
         ik_backend=ik_backend,
         visualize_ik=visualize_ik,
+        tracking_reference=tracking_reference,
     )
     print(f"IK backend: {ik_backend}")
     print("X2 simulation: controller motion -> left/right hand centers (position and orientation)")
-    print("Look forward when engaging a grip: heading locks until both grips are released.")
+    print(f"Tracking reference: {tracking_reference}")
+    if tracking_reference == "fixed-heading":
+        print("Look forward when engaging a grip: heading locks until both grips are released.")
+    else:
+        print("Full waist-relative control: release both grips before engaging; head pose is unused.")
     print(f"Control frequency target: {control_frequency:g} Hz")
     print("Hold the corresponding grip to move; release to hold. Close the viewer or press Ctrl-C to exit.")
     print("Hold Y to return both arms to the default pose; release to hold.")
+    print("Release both grips after returning to the default pose to resume tracking.")
     if with_omnihand:
         print("Left/right triggers close the corresponding Omnihand Pro hand; release to open (contacts disabled).")
     controller.run()
