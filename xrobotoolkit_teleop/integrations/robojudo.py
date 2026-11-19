@@ -8,6 +8,7 @@ from collections import OrderedDict
 from contextlib import ExitStack
 from dataclasses import replace
 from numbers import Real
+from typing import Literal
 
 import numpy as np
 import tyro
@@ -249,13 +250,16 @@ class RoboJuDoBridge:
             "enabled" if settings.collision_checking else "disabled",
         )
 
-    def _xr_frame(self):
+    def _ensure_xr(self):
         if self.xr_client is None:
             # Robot-requested HOME bypasses XR sampling.
             from xrobotoolkit_teleop.common.xr_client import XrClient
 
             self.xr_client = XrClient()
             self._resources.callback(self.xr_client.close)
+
+    def _xr_frame(self):
+        self._ensure_xr()
         xr = self.xr_client
         profile = self.retargeter.profile
         if xr.get_button_state_by_name(profile.home_button):
@@ -428,7 +432,8 @@ def main(
     return_velocity_limit: float = DEFAULTS.return_velocity_limit,
     robot: str = "x2",
     ik_backend: BackendName = BackendName.placo,
-    tracking_reference: TrackingReference = "fixed-heading",
+    tracking_reference: Literal["fixed-heading", "waist", "pelvis-ik"] = "fixed-heading",
+    posture_endpoint: str = "tcp://127.0.0.1:8557",
 ):
     """Publish bounded joint targets from live measured RoboJuDo feedback."""
     logging.basicConfig(level=logging.INFO)
@@ -439,14 +444,26 @@ def main(
     )
     if robot not in PROFILES:
         raise ValueError(f"Unknown robot {robot!r}; choose from {tuple(PROFILES)}")
-    bridge = RoboJuDoBridge(
-        command_endpoint,
-        feedback_endpoint,
-        settings,
-        robot=robot,
-        ik_backend=ik_backend,
-        tracking_reference=tracking_reference,
-    )
+    if tracking_reference == "pelvis-ik":
+        from xrobotoolkit_teleop.integrations.pelvis_ik import PelvisIKBridge
+
+        bridge = PelvisIKBridge(
+            command_endpoint,
+            feedback_endpoint,
+            settings,
+            robot=robot,
+            ik_backend=ik_backend,
+            posture_endpoint=posture_endpoint,
+        )
+    else:
+        bridge = RoboJuDoBridge(
+            command_endpoint,
+            feedback_endpoint,
+            settings,
+            robot=robot,
+            ik_backend=ik_backend,
+            tracking_reference=tracking_reference,
+        )
     logger.info("Tracking reference: %s", tracking_reference)
     logger.info(
         "Robot bridge publishing %s, receiving %s; release all grips before engaging",

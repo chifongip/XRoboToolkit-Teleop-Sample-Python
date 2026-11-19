@@ -170,7 +170,7 @@ class XrClient:
             head = None
         return (aggregate if type(aggregate) is int else None, head if type(head) is int else None)
 
-    def get_waist_sample(self) -> "WaistSample":
+    def get_waist_sample(self, *, pelvis_ik=False) -> "WaistSample":
         """Best-effort stable read using the unmodified SDK's public getters.
 
         Bracket pose reads with packet and body timestamps. The SDK can
@@ -184,11 +184,15 @@ class XrClient:
                 raise ValueError("body tracking unavailable")
             before = xrt.get_time_stamp_ns()
             body_before = self._body_frame_timestamps()
-            body = np.asarray(xrt.get_body_joints_pose(), dtype=float)
+            body = np.array(xrt.get_body_joints_pose(), dtype=float, copy=True)
             controllers = {
                 side: np.asarray(self.get_pose_by_name(f"{side}_controller"), dtype=float).copy()
                 for side in ("left", "right")
             }
+            grips, triggers = None, None
+            if pelvis_ik:
+                grips = {side: self.get_key_value_by_name(f"{side}_grip") for side in controllers}
+                triggers = {side: self.get_key_value_by_name(f"{side}_trigger") for side in controllers}
             body_after = self._body_frame_timestamps()
             after = xrt.get_time_stamp_ns()
             if before == after and body_before == body_after and xrt.is_body_data_available():
@@ -202,6 +206,9 @@ class XrClient:
                     observed_at=observed_at,
                     hip_positions=body[1:3, :3].copy(),  # PICO body joints: left hip, right hip.
                     body_head_timestamp_ns=body_before[1],
+                    shoulder_positions=body[16:18, :3].copy() if pelvis_ik else None,
+                    grips=grips,
+                    triggers=triggers,
                 )
         raise ValueError("XR packet or body timestamps changed during waist sample read")
 

@@ -28,6 +28,7 @@ class ZmqOptionTests(unittest.TestCase):
             {
                 "command_endpoint",
                 "feedback_endpoint",
+                "posture_endpoint",
                 "scale_factor",
                 "arm_velocity_limit",
                 "return_velocity_limit",
