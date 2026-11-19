@@ -49,7 +49,7 @@ class ExecutorModel(TransitionValidation):
             ]
             self.collision_checker = CollisionChecker(self.robot)
 
-    def validate_transition(self, measured, previous, candidate):
+    def validate_transition(self, measured, previous, candidate, *, independent_joints=()):
         if not self.settings.collision_checking:
             return
         robot = self.robot
@@ -65,4 +65,5 @@ class ExecutorModel(TransitionValidation):
         self._project_hands(previous_q)
         self._project_hands(candidate_q)
         self.collision_checker.clear_cache()
-        self._validate_motion(measured_q, previous_q, candidate_q)
+        offsets = tuple(robot.get_joint_offset(name) for name in independent_joints)
+        self._validate_motion(measured_q, previous_q, candidate_q, offsets)

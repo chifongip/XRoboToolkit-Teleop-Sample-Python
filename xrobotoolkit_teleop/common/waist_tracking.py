@@ -18,6 +18,9 @@ class WaistSample:
     observed_at: float  # Local getter observation time, not packet arrival time.
     hip_positions: np.ndarray | None = None  # XR-world positions in left, right order.
     body_head_timestamp_ns: int | None = None  # Body joint 15, not the separate headset pose.
+    shoulder_positions: np.ndarray | None = None  # XR-world positions in left, right order.
+    grips: dict[str, float] | None = None
+    triggers: dict[str, float] | None = None
 
 
 def _pelvis_control_axes(hip_positions, pelvis_rotation):

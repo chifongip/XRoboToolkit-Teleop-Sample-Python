@@ -8,21 +8,34 @@ from xrobotoolkit_teleop.ik.safety import CollisionPolicy
 
 
 class TransitionValidation(CollisionPolicy):
-    def _application_samples(self, start, candidate):
+    def _application_samples(self, start, candidate, independent_offsets=()):
         samples = self._collision_motion_samples(start, candidate, bool(self.hand_couplings))
-        if not self.hand_names:
+        if not self.hand_names and not independent_offsets:
             return samples
         # Arms and the two hand handles have independent application timing.
         # Include partial application, not just their synchronized diagonal.
         groups = []
         finger_offsets = set()
-        for names in self.profile.hands.groups.values():
+        hand_groups = self.profile.hands.groups.values() if self.hand_names else ()
+        for names in hand_groups:
             offsets = {self.robot.get_joint_offset(n) for n in names}
             offsets.update(passive for passive, source, _ in self.hand_couplings if source in offsets)
             finger_offsets.update(offsets)
             groups.append(sorted(offsets))
-        groups.insert(0, sorted(set(range(len(start))) - finger_offsets))
-        paths = [np.unique(np.vstack((start[offsets], samples[:, offsets])), axis=0) for offsets in groups]
+        groups.insert(0, sorted(set(range(len(start))) - finger_offsets - set(independent_offsets)))
+        groups.extend([offset] for offset in independent_offsets)
+        paths = []
+        for offsets in groups:
+            if np.array_equal(start[offsets], candidate[offsets]):
+                paths.append(start[None, offsets])
+                continue
+            group_samples = samples
+            if independent_offsets:
+                # Give each independently applied group its own sample spacing.
+                group_target = start.copy()
+                group_target[offsets] = candidate[offsets]
+                group_samples = self._collision_motion_samples(start, group_target, bool(self.hand_couplings))
+            paths.append(np.unique(np.vstack((start[offsets], group_samples[:, offsets])), axis=0))
         count = math.prod(len(path) for path in paths)
         if count > self.MAX_COLLISION_SAMPLES:
             raise RuntimeError("independent arm/hand motion exceeds sampling budget")
@@ -38,7 +51,7 @@ class TransitionValidation(CollisionPolicy):
 
         return configurations()
 
-    def _validate_motion(self, measured, previous, candidate):
+    def _validate_motion(self, measured, previous, candidate, independent_offsets=()):
         if not all(np.isfinite(configuration).all() for configuration in (measured, previous, candidate)):
             raise RuntimeError("non-finite robot command configuration")
         if not self.settings.collision_checking:
@@ -51,7 +64,7 @@ class TransitionValidation(CollisionPolicy):
                 robot.state.q = start
                 distances = self.collision_checker.clearances(self.collision_margin)
                 floor = np.minimum(np.minimum(distances, measured_distances), self.collision_margin)
-                for configuration in self._application_samples(start, candidate):
+                for configuration in self._application_samples(start, candidate, independent_offsets):
                     robot.state.q = configuration
                     values = (
                         self.collision_checker.clearance_bounds(floor)
