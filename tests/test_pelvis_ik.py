@@ -43,12 +43,19 @@ class PelvisBridgeTests(unittest.TestCase):
         self.assertEqual(bridge._yaw, 0.4)
 
 
-@unittest.skipUnless(
-    importlib.util.find_spec("casadi") and importlib.util.find_spec("pinocchio"),
-    "requires the LeRobot XR environment",
-)
 class WaistAssistTests(unittest.TestCase):
-    def test_waist_yaw_moves_only_when_fixed_yaw_misses(self):
+    @unittest.skipUnless(
+        importlib.util.find_spec("casadi") and importlib.util.find_spec("pinocchio"),
+        "requires the LeRobot XR environment",
+    )
+    def test_lerobot_waist_assist(self):
+        self.check_waist_assist("lerobot")
+
+    @unittest.skipUnless(importlib.util.find_spec("placo"), "requires Placo")
+    def test_placo_waist_assist(self):
+        self.check_waist_assist("placo")
+
+    def check_waist_assist(self, ik_backend):
         from xrobotoolkit_teleop.common.teleop_settings import TeleopSettings
         from xrobotoolkit_teleop.ik.types import IKProblem, LinearConstraint
         from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter
@@ -58,9 +65,9 @@ class WaistAssistTests(unittest.TestCase):
         stack = ExitStack()
         self.addCleanup(stack.close)
         profile = stack.enter_context(load_omnihand_profile(settings))
-        retargeter = ExternalStateRetargeter(settings, ik_backend="lerobot", profile=nullcontext(profile))
+        retargeter = ExternalStateRetargeter(settings, ik_backend=ik_backend, profile=nullcontext(profile))
         self.addCleanup(retargeter.close)
-        backend = WaistAssistedBackend(retargeter)
+        backend = WaistAssistedBackend(retargeter, ik_backend)
         yaw = WAIST_YAW
         measured = profile.spec.initial_positions.copy()
         arms = {joint: measured[joint] for joint in profile.spec.joints}
@@ -68,8 +75,9 @@ class WaistAssistTests(unittest.TestCase):
         empty = LinearConstraint(np.zeros((0, len(arms))), np.zeros(0))
 
         for sides in (("left",), ("right",), ("left", "right")):
-            for goal_yaw in (0.0, 0.65):
-                with self.subTest(sides=sides, goal_yaw=goal_yaw):
+            assisted_yaws = []
+            for preferred_yaw, goal_yaw in ((0.2, 0.2), (-0.2, 0.65), (0.2, 0.65)):
+                with self.subTest(sides=sides, preferred_yaw=preferred_yaw, goal_yaw=goal_yaw):
                     retargeter.robot.set_joint(yaw, goal_yaw)
                     retargeter.robot.update_kinematics()
                     targets = {
@@ -77,7 +85,7 @@ class WaistAssistTests(unittest.TestCase):
                     }
                     retargeter.robot.set_joint(yaw, measured[yaw])
                     retargeter.robot.update_kinematics()
-                    backend.begin(measured, 0.0, (-1.5708, 1.5708))
+                    backend.begin(measured, preferred_yaw, (-1.5708, 1.5708))
                     proposal = backend.propose(
                         IKProblem(
                             measured,
@@ -91,13 +99,20 @@ class WaistAssistTests(unittest.TestCase):
                             profile.spec.dt,
                         )
                     )
-                    self.assertEqual(proposal.positions, arms)
+                    self.assertEqual(proposal.positions.keys(), arms.keys())
+                    np.testing.assert_allclose([proposal.positions[name] for name in arms], bounds, atol=1e-6)
                     self.assertAlmostEqual(retargeter.robot.get_joint(yaw), measured[yaw])
-                    if goal_yaw:
-                        self.assertGreater(backend.solved_yaw, 0.25)
-                        self.assertLessEqual(backend.solved_yaw, 1.5708)
+                    if goal_yaw == preferred_yaw:
+                        self.assertAlmostEqual(backend.solved_yaw, preferred_yaw)
                     else:
-                        self.assertEqual(backend.solved_yaw, 0.0)
+                        # With fixed arms, yaw error also measures hand orientation error.
+                        solved_yaw = backend.solved_yaw
+                        self.assertLess(abs(goal_yaw - solved_yaw), abs(goal_yaw - preferred_yaw))
+                        self.assertLessEqual(abs(solved_yaw), 1.5708)
+                        assisted_yaws.append(solved_yaw)
+            if len(assisted_yaws) == 2:
+                with self.subTest(sides=sides):
+                    self.assertGreater(assisted_yaws[1], assisted_yaws[0] + 0.01)
 
         # Keeping the controller still preserves the pelvis-local goal even if
         # the measured waist has already started turning toward its target.

@@ -99,7 +99,7 @@ class PelvisGoalTasks:
         pelvis = self.robot.get_T_world_frame(PELVIS_FRAME)
         torso = self.robot.get_T_world_frame(self.torso)
         # The retargeter publishes torso-relative visualization and converts
-        # this transform back to model coordinates for LeRobot's IK task.
+        # this transform back to model coordinates for the IK task.
         return np.linalg.solve(torso, pelvis @ goal)
 
 
@@ -113,15 +113,15 @@ class ArmResult:
     waist_yaw: float | None = None
 
 
-def start_arm_solver(settings, profile):
+def start_arm_solver(settings, profile, ik_backend):
     # The worker owns the native solver and its mutable history. Spawn avoids
     # inheriting the XR SDK, the bridge sockets, or a locked native runtime.
     global _arm_solver, _arm_clutch
     _arm_solver = ExternalStateRetargeter(
-        settings, ik_backend="lerobot", profile=nullcontext(profile), tracking_reference="waist"
+        settings, ik_backend=ik_backend, profile=nullcontext(profile), tracking_reference="waist"
     )
     _arm_solver.waist_tracking = PelvisGoalTasks(_arm_solver)
-    _arm_solver.backend = WaistAssistedBackend(_arm_solver)
+    _arm_solver.backend = WaistAssistedBackend(_arm_solver, ik_backend)
     _arm_clutch = None
 
 
@@ -165,7 +165,7 @@ def solve_arms(state, frame, policy, restart, clutch, accepted):
 class ArmWorker:
     """Run one IK job at a time and publish on the bridge's ZMQ sockets."""
 
-    def __init__(self, retargeter):
+    def __init__(self, retargeter, ik_backend):
         self.profile = retargeter.profile
         self.joint_names = retargeter.joint_names
         self.command_names = retargeter.command_names
@@ -175,7 +175,7 @@ class ArmWorker:
             max_workers=1,
             mp_context=multiprocessing.get_context("spawn"),
             initializer=start_arm_solver,
-            initargs=(retargeter.settings, self.profile),
+            initargs=(retargeter.settings, self.profile, ik_backend),
         )
         self.policy = None
         self.restart = None
@@ -227,9 +227,10 @@ class WaistIKSolver(LeRobotIKSolver):
 class WaistAssistedBackend:
     """Use the existing arm transport and finger path with a separate waist result."""
 
-    def __init__(self, retargeter):
+    def __init__(self, retargeter, ik_backend):
         self.retargeter = retargeter
         self.arm_backend = retargeter.backend
+        self.ik_backend = ik_backend
         self.solvers = {}
         self.begin(None, None, None)
 
@@ -248,15 +249,19 @@ class WaistAssistedBackend:
         if solver is None:
             spec = self.arm_backend.spec
             # Only engaged hands enter the objective. Bounds still hold every inactive arm joint.
-            solver = WaistIKSolver(
-                replace(
-                    spec,
-                    joints=(*spec.joints, WAIST_YAW),
-                    frames={side: spec.frames[side] for side in active},
-                    groups={side: spec.groups[side] for side in active},
-                    limits={**spec.limits, WAIST_YAW: self.yaw_limits},
-                )
+            spec = replace(
+                spec,
+                joints=(*spec.joints, WAIST_YAW),
+                frames={side: spec.frames[side] for side in active},
+                groups={side: spec.groups[side] for side in active},
+                limits={**spec.limits, WAIST_YAW: self.yaw_limits},
             )
+            if self.ik_backend == "placo":
+                from xrobotoolkit_teleop.ik.placo_backend import PlacoBackend
+
+                solver = PlacoBackend(spec, preferred_joint=WAIST_YAW)
+            else:
+                solver = WaistIKSolver(spec)
             self.solvers[key] = solver
         return solver
 
@@ -270,7 +275,9 @@ class WaistAssistedBackend:
         retargeter = self.retargeter
         robot = retargeter.robot
         previous_configuration = robot.state.q.copy()
-        offsets = [robot.get_joint_offset(name) for name in solver.joint_names]
+        joints = (*self.arm_backend.spec.joints, WAIST_YAW)
+        offsets = [robot.get_joint_offset(name) for name in joints]
+        # Both backends use the previous-target reference for the preferred joint.
         previous = {**problem.previous, WAIST_YAW: self.preferred_yaw}
         # Keep the measured baseline separate from the candidate configurations sent to FK.
         measured = np.array(previous_configuration)
@@ -283,22 +290,28 @@ class WaistAssistedBackend:
         baseline[offsets[:-1]] = previous_configuration[offsets[:-1]]
 
         def try_candidate(yaw_min, yaw_max):
-            snapshot = solver.capture_state()
             try:
-                candidate = solver.solve(
-                    replace(
-                        problem,
-                        measured=self.measured,
-                        previous=previous,
-                        lower=np.r_[problem.lower, yaw_min],
-                        upper=np.r_[problem.upper, yaw_max],
-                        hard=hard,
-                        soft=soft,
-                    )
+                waist_problem = replace(
+                    problem,
+                    measured=self.measured,
+                    previous=previous,
+                    active=problem.active | {WAIST_YAW},
+                    lower=np.r_[problem.lower, yaw_min],
+                    upper=np.r_[problem.upper, yaw_max],
+                    hard=hard,
+                    soft=soft,
                 )
+                if self.ik_backend == "placo":
+                    candidate = solver.propose(waist_problem).positions
+                else:
+                    snapshot = solver.capture_state()
+                    try:
+                        candidate = solver.solve(waist_problem)
+                    finally:
+                        solver.restore_state(snapshot)
+                configuration = measured.copy()
+                configuration[offsets] = [candidate[name] for name in joints]
                 if retargeter.settings.collision_checking:
-                    configuration = baseline.copy()
-                    configuration[offsets] = [candidate[name] for name in solver.joint_names]
                     # The waist policy and arm executor can begin applying commands in either order.
                     retargeter._validate_motion(measured, baseline, configuration)
                     for first in (offsets[-1:], offsets[:-1]):
@@ -308,9 +321,11 @@ class WaistAssistedBackend:
                             continue
                         retargeter._validate_motion(measured, baseline, intermediate)
                         retargeter._validate_motion(intermediate, intermediate, configuration)
-                poses = solver.forward_kinematics({**self.measured, **candidate})
+                robot.state.q = configuration
+                robot.update_kinematics()
                 error = 0.0
-                for side, pose in poses.items():
+                for side in active:
+                    pose = robot.get_T_world_frame(self.arm_backend.spec.frames[side])
                     target = problem.targets[side]
                     distance = np.linalg.norm(pose[:3, 3] - target[:3, 3])
                     cosine = (np.trace(pose[:3, :3].T @ target[:3, :3]) - 1) / 2
@@ -320,7 +335,6 @@ class WaistAssistedBackend:
             except RuntimeError:
                 return None, math.inf
             finally:
-                solver.restore_state(snapshot)
                 robot.state.q = previous_configuration.copy()
                 robot.update_kinematics()
 
@@ -374,8 +388,8 @@ class PelvisIKBridge(RoboJuDoBridge):
         posture_endpoint="tcp://127.0.0.1:8557",
         **kwargs,
     ):
-        if robot != "x2_omnihand" or ik_backend != "lerobot":
-            raise ValueError("pelvis-ik requires --robot x2_omnihand --ik-backend lerobot")
+        if robot not in ("x2", "x2_omnihand"):
+            raise ValueError("pelvis-ik requires --robot x2 or x2_omnihand")
         super().__init__(*args, robot=robot, ik_backend=ik_backend, tracking_reference="waist", **kwargs)
         try:
             context = kwargs.get("context") or zmq.Context.instance()
@@ -385,7 +399,7 @@ class PelvisIKBridge(RoboJuDoBridge):
             self.posture_socket.bind(posture_endpoint)
             self.tracking = WaistTracking(self.settings.tracking_timeout_s)
             self.hands = HandGoals(self.retargeter)
-            self.retargeter = ArmWorker(self.retargeter)
+            self.retargeter = ArmWorker(self.retargeter, ik_backend)
             self._resources.callback(self.retargeter.close)
         except Exception:
             self.close()
@@ -507,15 +521,21 @@ class PelvisIKBridge(RoboJuDoBridge):
         if self._home_pending:
             self._posture(state, *state["xr_posture"]["defaults"])
             return XRFrame(stamp, {}, {}, return_to_default=True), now
-        sample = xr.get_waist_sample(pelvis_ik=True)
+        with_hands = bool(self.retargeter.hand_names)
+        sample = (
+            xr.get_waist_sample(pelvis_ik=True)
+            if with_hands
+            else xr.get_waist_sample(pelvis_ik=True, include_triggers=False)
+        )
         controllers = self.tracking.update(sample)
         if controllers is None:
             raise ValueError(self.tracking.reason)
+        controls = (sample.grips, sample.triggers) if with_hands else (sample.grips,)
         if any(
             not isinstance(values, dict)
             or set(values) != set(controllers)
             or any(isinstance(v, bool) or not isinstance(v, Real) or not 0 <= v <= 1 for v in values.values())
-            for values in (sample.grips, sample.triggers)
+            for values in controls
         ):
             raise ValueError("invalid XR grips or triggers")
         pelvis = xr_pose_to_matrix(sample.pelvis_pose)
@@ -539,7 +559,7 @@ class PelvisIKBridge(RoboJuDoBridge):
         posture_grips = pressed if self._reference is not None else active
         self._sample_posture(state, posture_grips, pelvis[1, 3], heading)
         goals = self.hands.update(grips, controllers, state["positions"])
-        frame = XRFrame(sample.xr_timestamp_ns, {}, grips, triggers=sample.triggers, waist=goals)
+        frame = XRFrame(sample.xr_timestamp_ns, {}, grips, triggers=sample.triggers if with_hands else {}, waist=goals)
         return frame, sample.observed_at
 
     def _home_complete(self, state):

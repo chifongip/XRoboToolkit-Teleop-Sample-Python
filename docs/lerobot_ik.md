@@ -184,7 +184,7 @@ pose test. LeRobot cases are skipped unless `X2_TEST_LEROBOT=1` is set.
 From the RoboJuDo-Plus root, `python scripts/install_xrobotoolkit_teleop.py` creates `robojudo-xr` with Python 3.11,
 Placo and LeRobot, builds the matching symbolic bindings and registers them permanently. Activate that environment
 with `conda activate robojudo-xr`. Both IK methods run there; no manual `PYTHONPATH` setup is needed.
-See the [RoboJuDo setup and validation guide](robojudo_bridge.md#setup-and-validation) for prerequisites, reuse and verification.
+See the [RoboJuDo bridge guide](robojudo_bridge.md) for the deployment setup and verification instructions.
 
 ## Manual native environment
 

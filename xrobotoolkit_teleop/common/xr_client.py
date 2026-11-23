@@ -170,7 +170,7 @@ class XrClient:
             head = None
         return (aggregate if type(aggregate) is int else None, head if type(head) is int else None)
 
-    def get_waist_sample(self, *, pelvis_ik=False) -> "WaistSample":
+    def get_waist_sample(self, *, pelvis_ik=False, include_triggers=True) -> "WaistSample":
         """Best-effort stable read using the unmodified SDK's public getters.
 
         Bracket pose reads with packet and body timestamps. The SDK can
@@ -192,7 +192,8 @@ class XrClient:
             grips, triggers = None, None
             if pelvis_ik:
                 grips = {side: self.get_key_value_by_name(f"{side}_grip") for side in controllers}
-                triggers = {side: self.get_key_value_by_name(f"{side}_trigger") for side in controllers}
+                if include_triggers:
+                    triggers = {side: self.get_key_value_by_name(f"{side}_trigger") for side in controllers}
             body_after = self._body_frame_timestamps()
             after = xrt.get_time_stamp_ns()
             if before == after and body_before == body_after and xrt.is_body_data_available():

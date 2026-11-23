@@ -7,7 +7,7 @@ from .backend import IKSolver
 
 
 class PlacoIKSolver(IKSolver):
-    def __init__(self, spec, robot):
+    def __init__(self, spec, robot, *, preferred_joint=None):
         self.spec = spec
         self.robot = robot
         self._native = placo.KinematicsSolver(self.robot._native)
@@ -34,6 +34,8 @@ class PlacoIKSolver(IKSolver):
             if len(spec.groups.get(key, spec.joints)) >= 6
         ]
         self.posture_task = self._native.add_joints_task()
+        self.preferred_joint = preferred_joint
+        self.preferred_joint_task = self._native.add_joints_task() if preferred_joint is not None else None
         self._constraints = [
             self._native.add_joint_space_half_spaces_constraint(np.zeros((1, self.robot.model.nq)), np.ones(1))
             for _ in range(3)
@@ -67,6 +69,9 @@ class PlacoIKSolver(IKSolver):
             problem.joint_target if homing else {name: self.spec.initial_positions[name] for name in self.spec.joints}
         )
         self.posture_task.configure("posture", "soft", 1.0 if homing else 1e-4)
+        if self.preferred_joint_task is not None:
+            self.preferred_joint_task.set_joint(self.preferred_joint, problem.previous[self.preferred_joint])
+            self.preferred_joint_task.configure("preferred_joint", "soft", 0.0 if homing else 1.0)
         n = len(self.spec.joints)
         self._set_constraint(
             self._constraints[0], np.r_[np.eye(n), -np.eye(n)], np.r_[problem.upper, -problem.lower], "hard"

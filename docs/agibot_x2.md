@@ -13,26 +13,17 @@ the `x2` extra from this repository's root:
 python -m pip install -e ".[x2]"
 ```
 
-For the RoboJuDo integration, run `python scripts/install_xrobotoolkit_teleop.py` from the RoboJuDo-Plus root.
-It creates a single `robojudo-xr` Python 3.11 environment with Placo and LeRobot, including the native bindings.
-Use `--reuse` explicitly for an existing environment, or `--name NAME` to choose another name.
-See [the bridge setup guide](robojudo_bridge.md).
-
 For a standalone Placo-only installation, a fresh environment is recommended for dependency isolation. With Conda installed, create a dedicated
 Python 3.11 environment and run these commands from this repository's root:
 
 ```bash
-conda create -n robojudo-xr python=3.11 pip -y
-conda activate robojudo-xr
+conda create -n x2-standalone python=3.11 pip -y
+conda activate x2-standalone
 python -m pip install -e ".[x2]"
 ```
 
-If reusing an existing Python 3.10+ environment, activate it and run only the pip
-command. RoboJuDo-Plus's automated setup instead creates its target with Python 3.11 and both IK methods.
-In later terminals, activate
-`robojudo-xr` again before running the sample. These commands install only the
-X2 Python dependencies; PC Service remains a separate installation. The X2-only
-pip installation does not create or switch Conda environments.
+If reusing an existing Python 3.10+ environment, activate it and run the pip command.
+Activate the same environment in later terminals before running the sample. Install PC Service separately.
 
 This installs the shared dependencies (NumPy, Meshcat, Placo, and the XRoboToolkit
 SDK) plus MuJoCo, Tyro, and PyZMQ, including their transitive dependencies. It supports
@@ -67,7 +58,7 @@ The optional `--ik-backend lerobot` selects LeRobot's G1-style nonlinear IK
 adapted to X2. Placo remains the default. See the [backend setup and behavior](lerobot_ik.md)
 for native dependencies, shared command protection, and headless comparisons.
 
-Activate the installed environment (for example, `conda activate xr-robotics`),
+Activate the installed environment (for example, `conda activate x2-standalone`),
 start XRoboToolkit PC Service, and connect the headset and two VR controllers:
 
 ```bash

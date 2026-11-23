@@ -6,6 +6,6 @@ from .placo_solver import PlacoIKSolver
 
 
 class PlacoBackend(TransactionalBackend):
-    def __init__(self, spec):
+    def __init__(self, spec, *, preferred_joint=None):
         robot = PlacoModel(spec)
-        super().__init__(spec, robot, PlacoIKSolver(spec, robot))
+        super().__init__(spec, robot, PlacoIKSolver(spec, robot, preferred_joint=preferred_joint))
