@@ -17,6 +17,7 @@ import zmq
 from xrobotoolkit_teleop.common.teleop_settings import DEFAULTS, TeleopSettings, TrackingReference
 from xrobotoolkit_teleop.common.waist_tracking import read_waist_sample
 from xrobotoolkit_teleop.ik.registry import BackendName
+from xrobotoolkit_teleop.integrations.joystick_velocity import JoystickVelocity
 from xrobotoolkit_teleop.integrations.retargeter import ExternalStateRetargeter, XRFrame
 from xrobotoolkit_teleop.integrations.robot_profiles import PROFILES
 
@@ -116,6 +117,9 @@ class RoboJuDoBridge:
         self._latest = None
         self._multipart = False
         self._feedback_timeout = 0.1
+        self._joystick_velocity = None
+        self._velocity_bind_endpoint = None
+        self._command_bind_host = command_endpoint.rpartition(":")[0]
         self._last_warning = float("-inf")
         self.status = "waiting for robot feedback"
         self.hold_reason = "no fresh robot feedback received"
@@ -136,6 +140,7 @@ class RoboJuDoBridge:
                 "model_fingerprint": model_fingerprint(self.retargeter.profile),
             }
             context = zmq.Context.instance() if context is None else context
+            self._context = context
             self.commands = context.socket(zmq.PUB)
             self._resources.callback(self.commands.close, linger=0)
             self.feedback = context.socket(zmq.SUB)
@@ -154,7 +159,42 @@ class RoboJuDoBridge:
         self._command_log = _CommandLog(self.bridge_id)
 
     def close(self):
+        self._close_velocity()
         self._resources.close()
+
+    def _close_velocity(self):
+        if self._joystick_velocity is not None:
+            self._joystick_velocity.close()
+            self._joystick_velocity = None
+            self._velocity_bind_endpoint = None
+
+    def _stop_velocity(self):
+        if self._joystick_velocity is not None:
+            self._joystick_velocity.stop()
+
+    def _configure_velocity(self, endpoint):
+        if not isinstance(endpoint, str) or not endpoint.startswith("tcp://"):
+            raise ValueError("expected a TCP velocity endpoint in robot feedback")
+        host, _, port = endpoint.removeprefix("tcp://").rpartition(":")
+        if not host or not port.isascii() or not port.isdecimal() or not 1 <= int(port) <= 65535:
+            raise ValueError("invalid TCP velocity endpoint in robot feedback")
+        if not self._command_bind_host.startswith("tcp://"):
+            raise ValueError("XR velocity requires a TCP arm command endpoint")
+        # Use the arm publisher's bind interface and the robot-configured velocity port.
+        bind_endpoint = f"{self._command_bind_host}:{int(port)}"
+        if bind_endpoint == self._velocity_bind_endpoint:
+            return
+        self._close_velocity()
+        socket = self._context.socket(zmq.PUB)
+        try:
+            socket.setsockopt(zmq.SNDHWM, 1)
+            socket.bind(bind_endpoint)
+        except zmq.ZMQError:
+            socket.close(linger=0)
+            raise
+        self._joystick_velocity = JoystickVelocity(socket, self.settings.tracking_timeout_s)
+        self._velocity_bind_endpoint = bind_endpoint
+        logger.info("XR joystick velocity publishing on %s", bind_endpoint)
 
     def _warn(self, exc):
         if time.monotonic() - self._last_warning >= 1:
@@ -282,10 +322,31 @@ class RoboJuDoBridge:
 
     def poll(self):
         try:
-            latest = self.receive_feedback()
+            latest = self._receive_control_feedback()
             return self._publish_desired(latest) if latest else False
         finally:
             self._command_log.report(self.status)
+
+    def _receive_control_feedback(self, *, home_pending=False):
+        state = self.receive_feedback()
+        if not state:
+            self._stop_velocity()
+            return state
+        if "xr_velocity" not in state:
+            self._close_velocity()
+            return state
+        try:
+            self._configure_velocity(state["xr_velocity"]["endpoint"])
+            if state["intent"] == "TRACK" and not home_pending:
+                self._ensure_xr()
+                deadline = self._received_at + state["feedback_timeout_s"] - max(state["joint_age_s"].values())
+                self._joystick_velocity.poll(self.xr_client, state, self.retargeter.profile.home_button, deadline)
+            else:
+                self._stop_velocity()
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, OverflowError, zmq.ZMQError) as exc:
+            self._stop_velocity()
+            self._warn(f"joystick velocity paused: {exc}")
+        return state
 
     def wait_until_publish(self, deadline):
         """Drain feedback between ticks without sampling XR or running IK."""
@@ -294,7 +355,9 @@ class RoboJuDoBridge:
             if remaining <= 0:
                 return
             if self.feedback.poll(timeout=max(1, int(remaining * 1000)), flags=zmq.POLLIN):
-                self.receive_feedback()
+                state = self.receive_feedback()
+                if not state or state["intent"] != "TRACK":
+                    self._stop_velocity()
 
     def receive_feedback(self):
         latest, received_at = None, None

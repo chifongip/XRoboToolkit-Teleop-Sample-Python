@@ -614,7 +614,7 @@ class PelvisIKBridge(RoboJuDoBridge):
             self._command_log.report(self.status)
 
     def _poll(self):
-        state = self.receive_feedback()
+        state = self._receive_control_feedback(home_pending=self._home_pending)
         if not state:
             return False
         session = state["session_id"], state["generation"]
