@@ -1,24 +1,27 @@
-"""Cycle X2 from home to a T pose through mocked XR input, without an XR service."""
+"""Replay fixed-base X2 and G1 arm motion with mocked XR input."""
 
 from contextlib import ExitStack, nullcontext, redirect_stdout
 import io
-import json
 import math
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 from unittest.mock import patch
 
 import mujoco
 from mujoco import viewer as mj_viewer
 import numpy as np
 from meshcat import transformations as tf
-import tyro
 
-from xrobotoolkit_teleop.ik import BackendName
 from xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller import AgibotX2TeleopController
+from xrobotoolkit_teleop.simulation.unitree_g1_model import DEFAULT_G1_VARIANT, G1Variant
+from xrobotoolkit_teleop.simulation.unitree_g1_teleop_controller import UnitreeG1TeleopController
 from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD
 from xrobotoolkit_teleop.utils.path_utils import ASSET_PATH
+
+
+ReplayRobot = Literal["x2", "g1"]
 
 
 class OfflineXR:
@@ -51,6 +54,19 @@ class OfflineXR:
         self.closed = True
 
 
+def g1_t_pose_deviation(data):
+    """Measure the largest angle of an arm segment from its outward lateral direction."""
+    angles = []
+    for side, sign in (("left", 1), ("right", -1)):
+        shoulder = data.body(f"{side}_shoulder_roll_link").xpos
+        elbow = data.body(f"{side}_elbow_link").xpos
+        palm = data.body(f"{side}_palm_center").xpos
+        for segment in (elbow - shoulder, palm - elbow):
+            cosine = sign * segment[1] / np.linalg.norm(segment)
+            angles.append(math.degrees(math.acos(np.clip(cosine, -1, 1))))
+    return max(angles)
+
+
 def run_replay(
     ik_backend="placo",
     with_omnihand=False,
@@ -59,12 +75,15 @@ def run_replay(
     hold_seconds=1.0,
     visualize=False,
     visualize_ik=False,
+    *,
+    robot: ReplayRobot = "x2",
+    variant: G1Variant | None = None,
 ):
     """Exercise XR mapping, the selected IK backend, command checks, and physics.
 
     MuJoCo FK on separate reference data generates the desired poses. Actual
-    robot joints are driven only by the controller's position servos. T-pose
-    elbow targets are straight, so this also exercises a near-singular endpoint.
+    robot joints are driven only by the controller's position servos.
+    The poses are generated from trajectories in the selected robot's joint space.
     """
     ik_backend = getattr(ik_backend, "value", ik_backend)
     if not isinstance(cycles, int) or isinstance(cycles, bool) or cycles < 1:
@@ -72,30 +91,52 @@ def run_replay(
     for name, value in (("move_seconds", move_seconds), ("hold_seconds", hold_seconds)):
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
-    assets = Path(ASSET_PATH) / "agibot/x2"
-    scene, urdf = ("scene_omnihand.xml", "x2_omnihand_ik.urdf") if with_omnihand else ("scene.xml", "x2_fixed.urdf")
+    if robot == "x2":
+        if variant is not None:
+            raise ValueError("--variant requires --robot g1")
+        assets = Path(ASSET_PATH) / "agibot/x2"
+        scene, urdf = ("scene_omnihand.xml", "x2_omnihand_ik.urdf") if with_omnihand else ("scene.xml", "x2_fixed.urdf")
+        controller = AgibotX2TeleopController
+        args = (str(assets / scene), str(assets / urdf))
+        kwargs = {}
+    elif robot == "g1":
+        if with_omnihand:
+            raise ValueError("--with-omnihand requires --robot x2")
+        variant = DEFAULT_G1_VARIANT if variant is None else variant
+        controller = UnitreeG1TeleopController
+        args = ()
+        kwargs = {"variant": variant}
+    else:
+        raise ValueError("robot must be x2 or g1")
+
     with ExitStack() as cleanup:
-        # Patch the client factory before construction: the native SDK is never initialized.
-        with patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.XrClient", OfflineXR):
-            with redirect_stdout(sys.stderr if visualize_ik else io.StringIO()):
-                c = AgibotX2TeleopController(
-                    str(assets / scene), str(assets / urdf), ik_backend=ik_backend, visualize_ik=visualize_ik
-                )
+        # Patch before construction so the native SDK is never initialized.
+        with (
+            patch.object(controller, "_create_xr_client", OfflineXR),
+            redirect_stdout(sys.stderr if visualize_ik else io.StringIO()),
+        ):
+            c = controller(*args, ik_backend=ik_backend, visualize_ik=visualize_ik, **kwargs)
         cleanup.callback(c.close)
         viewer = None
         if visualize:
             viewer = cleanup.enter_context(mj_viewer.launch_passive(c.mj_model, c.mj_data))
             viewer.cam.azimuth, viewer.cam.elevation, viewer.cam.distance = 135, -15, 2.5
-            viewer.cam.lookat = [0, 0, 0.7]
+            viewer.cam.lookat = c.CAMERA_LOOKAT
 
         model = c.mj_model
         reference_data = mujoco.MjData(model)
         home = model.key("home").qpos.copy()
-        t_pose = home.copy()
+        extended = home.copy()
+        # G1's forearm points forward at zero elbow angle. A quarter turn
+        # at the elbow aligns it with the outward upper arm.
+        shoulder_roll, elbow = (math.pi / 2, math.pi / 2) if robot == "g1" else (1.55, 0.0)
         for side, sign in (("left", 1), ("right", -1)):
-            for joint, value in (("shoulder_pitch", 0.0), ("shoulder_roll", sign * 1.55), ("elbow", 0.0)):
-                t_pose[model.joint(f"{side}_{joint}_joint").qposadr[0]] = value
-        frames = {side: model.body(f"{side}_hand_center").id for side in ("left", "right")}
+            for joint, value in (("shoulder_pitch", 0.0), ("shoulder_roll", sign * shoulder_roll), ("elbow", elbow)):
+                extended[model.joint(f"{side}_{joint}_joint").qposadr[0]] = value
+        frames = {
+            group.removesuffix("_arm"): model.body(config["link_name"]).id
+            for group, config in c.manipulator_config.items()
+        }
 
         def hand_frames(q):
             reference_data.qpos[:] = q
@@ -170,7 +211,7 @@ def run_replay(
         advance(home)
         move_steps, hold_steps = math.ceil(move_seconds / c.dt), math.ceil(hold_seconds / c.dt)
         for cycle in range(cycles):
-            for start, end, label in ((home, t_pose, "T"), (t_pose, home, "home")):
+            for start, end, label in ((home, extended, "T"), (extended, home, "home")):
                 for index in range(1, move_steps + 1):
                     alpha = (1 - np.cos(np.pi * index / move_steps)) / 2
                     advance(start + alpha * (end - start))
@@ -194,6 +235,12 @@ def run_replay(
                             side: c.mj_data.xquat[body].tolist() for side, body in frames.items()
                         },
                     }
+                    if robot == "g1" and label == "T":
+                        angle = g1_t_pose_deviation(c.mj_data)
+                        endpoint["max_arm_t_pose_deviation_deg"] = angle
+                        check(
+                            angle <= 10, "G1 T pose requires both upper arms and forearms within 10 degrees of lateral"
+                        )
                     c._update_robot_state()
                     endpoint["min_measured_clearance_m"] = float(c.collision_checker.distances().min())
                     endpoints.append(endpoint)
@@ -221,6 +268,8 @@ def run_replay(
         check(orientation_drift <= 0.02, "repeated endpoint orientations drift by more than 0.02 rad")
         check(max_mapping_error <= 1e-6, "mock XR input does not reproduce the reference hand poses")
         return {
+            "robot": robot,
+            "variant": variant,
             "backend": ik_backend,
             "omnihand": with_omnihand,
             "cycles": cycles,
@@ -237,48 +286,3 @@ def run_replay(
             "max_endpoint_orientation_drift_rad": orientation_drift,
             "endpoints": endpoints,
         }
-
-
-def main(
-    ik_backend: BackendName = BackendName.placo,
-    with_omnihand: bool = False,
-    cycles: int = 2,
-    move_seconds: float = 2.0,
-    hold_seconds: float = 1.0,
-    visualize: bool = False,
-    visualize_ik: bool = False,
-):
-    """Offline home -> T -> home test; exits with status 1 on a failed check.
-
-    Args:
-        ik_backend: Registered IK backend to exercise.
-        with_omnihand: Use the articulated-hand scene; fingers remain open.
-        cycles: Number of complete home -> T -> home cycles.
-        move_seconds: Simulated duration of each smooth transition.
-        hold_seconds: Simulated settling time at each endpoint.
-        visualize: Open the MuJoCo physics viewer and pace the replay in real time.
-        visualize_ik: Open the shared browser IK viewer and pace the replay in real time.
-    """
-    try:
-        result = run_replay(
-            ik_backend=ik_backend,
-            with_omnihand=with_omnihand,
-            cycles=cycles,
-            move_seconds=move_seconds,
-            hold_seconds=hold_seconds,
-            visualize=visualize,
-            visualize_ik=visualize_ik,
-        )
-    except KeyboardInterrupt:
-        print("Offline replay interrupted before completion.", file=sys.stderr)
-        raise SystemExit(130) from None
-    except RuntimeError as exc:
-        print(json.dumps({"passed": False, "error": str(exc)}))
-        raise SystemExit(1) from None
-    print(json.dumps(result, indent=2, allow_nan=False))
-    if not result["passed"]:
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    tyro.cli(main)

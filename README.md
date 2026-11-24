@@ -106,6 +106,16 @@ bindings, OmniHand Pro, collision protection, and offline replay.
 python scripts/simulation/teleop_agibot_x2_mujoco.py
 ```
 
+### Unitree G1 simulation
+
+Run either revision 1.0 G1 variant with the X2 standalone controls. See the
+[G1 simulation guide](docs/unitree_g1.md) for setup, tracking modes, and IK backends.
+
+```bash
+python scripts/simulation/teleop_unitree_g1_mujoco.py --variant 23dof
+python scripts/simulation/teleop_unitree_g1_mujoco.py --variant 29dof
+```
+
 ### Running the Placo Visualization Demo
 
 To run the teleoperation demo with a UR5e robot in Placo visualization:

@@ -11,12 +11,14 @@ from unittest.mock import patch
 
 import numpy as np
 
+from xrobotoolkit_teleop.simulation import offline_replay as replay
+
 
 spec = importlib.util.spec_from_file_location(
-    "x2_offline_replay", Path(__file__).resolve().parents[1] / "scripts/misc/test_x2_ik_offline.py"
+    "ik_offline_cli", Path(__file__).resolve().parents[1] / "scripts/misc/test_ik_offline.py"
 )
-replay = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(replay)
+replay_cli = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(replay_cli)
 
 
 class OfflineReplayTests(unittest.TestCase):
@@ -34,6 +36,8 @@ class OfflineReplayTests(unittest.TestCase):
                 # Exercise both visualization paths using fake windows; CI stays headless.
                 result = replay.run_replay(backend, with_omnihand=hands, visualize=hands, visualize_ik=hands)
                 self.assertTrue(result["passed"], result["violations"])
+                self.assertEqual(result["robot"], "x2")
+                self.assertIsNone(result["variant"])
                 self.assertEqual(result["failed_cycles"], 0)
                 self.assertEqual([e["pose"] for e in result["endpoints"]], ["T", "home", "T", "home"])
                 self.assertEqual(result["control_steps"], 601)
@@ -83,11 +87,11 @@ class OfflineReplayTests(unittest.TestCase):
 
     def test_interrupted_replay_does_not_exit_successfully(self):
         with (
-            patch.object(replay, "run_replay", side_effect=KeyboardInterrupt),
+            patch.object(replay_cli, "run_replay", side_effect=KeyboardInterrupt),
             contextlib.redirect_stderr(io.StringIO()),
         ):
             with self.assertRaises(SystemExit) as stopped:
-                replay.main()
+                replay_cli.main()
         self.assertEqual(stopped.exception.code, 130)
 
     def test_nonfinite_velocity_fails_and_releases_offline_client(self):
@@ -105,7 +109,7 @@ class OfflineReplayTests(unittest.TestCase):
             contextlib.redirect_stdout(output),
         ):
             with self.assertRaises(SystemExit) as failed:
-                replay.main()
+                replay_cli.main()
         self.assertEqual(failed.exception.code, 1)
         self.assertTrue(xr.closed)
         report = json.loads(output.getvalue())

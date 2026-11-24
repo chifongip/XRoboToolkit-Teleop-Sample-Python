@@ -124,8 +124,8 @@ python -m unittest discover -s tests -v
 Replay default → T pose → default without a headset or XR PC Service:
 
 ```bash
-python scripts/misc/test_x2_ik_offline.py --ik-backend placo --visualize
-python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --with-omnihand --visualize
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend placo --visualize
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend lerobot --with-omnihand --visualize
 ```
 
 `--visualize` shows the simulated robot in MuJoCo. Add `--visualize-ik` to open

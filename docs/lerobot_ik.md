@@ -127,12 +127,12 @@ Replay default → T pose → default using mock XR input, with either backend:
 
 ```bash
 # Headless: JSON report, exit status 0 on success and 1 on a failed check.
-python scripts/misc/test_x2_ik_offline.py --ik-backend placo
-python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --with-omnihand
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend placo
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend lerobot --with-omnihand
 
 # Watch the real simulated motion in MuJoCo; optionally add the browser IK view.
-python scripts/misc/test_x2_ik_offline.py --ik-backend lerobot --visualize
-python scripts/misc/test_x2_ik_offline.py --ik-backend placo --with-omnihand --visualize --visualize-ik
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend lerobot --visualize
+python scripts/misc/test_ik_offline.py --robot x2 --ik-backend placo --with-omnihand --visualize --visualize-ik
 ```
 
 No headset or XR PC Service is required. The harness replaces the XR client
@@ -143,11 +143,12 @@ initial clutch references. Both grips stay held, and frame timestamps advance
 once per control cycle. The normal XR mapping, selected IK backend, collision
 checks, command acceptance, servos, and MuJoCo dynamics remain active.
 
-The T reference sets shoulder pitch to zero, shoulder roll to ±1.55 rad, and
+The X2 T reference sets shoulder pitch to zero, shoulder roll to ±1.55 rad, and
 elbows to zero, exercising near-horizontal arms and a straight-elbow endpoint.
 Other joints retain their default reference values; Omnihand fingers remain open.
 Each transition uses a cosine ramp. Defaults are two complete cycles, two
 simulated seconds per transition, and one second of settling at each endpoint.
+See the [G1 replay](unitree_g1.md#offline-replay) for its joint targets.
 Adjust these with `--cycles`, `--move-seconds`, and `--hold-seconds`. Shortening
 the motion or settling time can cause tracking checks to fail.
 

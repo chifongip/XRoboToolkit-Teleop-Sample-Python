@@ -518,7 +518,7 @@ class X2SimulationTests(unittest.TestCase):
         c = self.make_controller()
         xr = c.xr_client
         xr.grips.update(left_grip=1.0, right_grip=1.0)
-        with patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.time.monotonic") as clock:
+        with patch("xrobotoolkit_teleop.simulation.fixed_base_teleop_controller.time.monotonic") as clock:
             clock.return_value = 100.0
             c.step_control()
             xr.poses["left_controller"][0] = 0.15
@@ -662,7 +662,7 @@ class X2SimulationTests(unittest.TestCase):
     def test_viewer_close_and_interrupt_close_xr(self):
         for interrupt in (False, True):
             c = self.make_controller()
-            with patch("xrobotoolkit_teleop.simulation.agibot_x2_teleop_controller.mj_viewer.launch_passive") as launch:
+            with patch("xrobotoolkit_teleop.simulation.fixed_base_teleop_controller.mj_viewer.launch_passive") as launch:
                 viewer = launch.return_value.__enter__.return_value
                 if interrupt:
                     viewer.is_running.side_effect = KeyboardInterrupt

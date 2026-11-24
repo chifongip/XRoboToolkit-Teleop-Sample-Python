@@ -1,4 +1,4 @@
-"""Shared X2 collision constraints and bounded command-path sampling."""
+"""Shared collision constraints and bounded command-path sampling."""
 
 import numpy as np
 from numpy.polynomial.polynomial import polyval
@@ -7,6 +7,7 @@ from .types import LinearConstraint
 
 
 class CollisionPolicy:
+    ROBOT_LABEL = "X2"
     COLLISION_CHECK_STEP_RAD = 0.02
     MAX_COLLISION_SAMPLES = 4096
 
@@ -64,7 +65,7 @@ class CollisionPolicy:
 
     def _check_collision_clearance(self):
         if np.any(self.collision_checker.distances() < self.collision_margin - 1e-6):
-            raise RuntimeError("X2 self-collision clearance violated")
+            raise RuntimeError(f"{self.ROBOT_LABEL} self-collision clearance violated")
 
     def _collision_motion_samples(self, start, target, coupled_hands):
         """Sample coupled finger motion while preserving measured tracking error.
@@ -74,7 +75,7 @@ class CollisionPolicy:
         within COLLISION_CHECK_STEP_RAD, including nonlinear passive motion.
         """
         if not np.all(np.isfinite(start)) or not np.all(np.isfinite(target)):
-            raise RuntimeError("non-finite X2 collision configuration")
+            raise RuntimeError(f"non-finite {self.ROBOT_LABEL} collision configuration")
         delta = target - start
         rates = np.abs(delta)
         max_abs = np.maximum(np.abs(start), np.abs(target))
@@ -91,7 +92,7 @@ class CollisionPolicy:
                 corrections.append((passive, source, coefficients, initial_error, final_error))
         max_rate = float(np.max(rates[7:]))
         if not np.isfinite(max_rate) or max_rate > self.MAX_COLLISION_SAMPLES * self.COLLISION_CHECK_STEP_RAD:
-            raise RuntimeError("X2 collision motion exceeds sampling budget")
+            raise RuntimeError(f"{self.ROBOT_LABEL} collision motion exceeds sampling budget")
         steps = max(1, int(np.ceil(max_rate / self.COLLISION_CHECK_STEP_RAD)))
         fractions = np.linspace(0, 1, steps + 1)[1:]
         samples = start + fractions[:, None] * delta
@@ -100,5 +101,5 @@ class CollisionPolicy:
                 polyval(samples[:, source], coefficients) + (1 - fractions) * initial_error + fractions * final_error
             )
         if not np.all(np.isfinite(samples)):
-            raise RuntimeError("non-finite X2 collision motion")
+            raise RuntimeError(f"non-finite {self.ROBOT_LABEL} collision motion")
         return samples

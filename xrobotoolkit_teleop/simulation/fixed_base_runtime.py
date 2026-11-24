@@ -1,4 +1,4 @@
-"""Backend-neutral MuJoCo/XR lifecycle used by the X2 controller."""
+"""Backend-neutral fixed-base MuJoCo and XR lifecycle."""
 
 import threading
 import xml.etree.ElementTree as ET
@@ -11,7 +11,7 @@ from xrobotoolkit_teleop.ik.types import VisualizationSnapshot
 from xrobotoolkit_teleop.utils.geometry import R_HEADSET_TO_WORLD, quat_diff_as_angle_axis
 
 
-class X2MujocoRuntime:
+class FixedBaseMujocoRuntime:
     def __init__(
         self,
         xml_path,
@@ -48,7 +48,10 @@ class X2MujocoRuntime:
     def _robot_setup(self):
         self.mj_model = mujoco.MjModel.from_xml_path(self.xml_path)
         self.mj_data = mujoco.MjData(self.mj_model)
-        mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, self.mj_model.key("home").id)
+        home = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_KEY, "home")
+        if home < 0:
+            raise ValueError("MuJoCo scene requires a home keyframe")
+        mujoco.mj_resetDataKeyframe(self.mj_model, self.mj_data, home)
         mujoco.mj_forward(self.mj_model, self.mj_data)
         self.mj_model.vis.headlight.ambient = [0.4, 0.4, 0.4]
         self.mj_model.vis.headlight.diffuse = [0.8, 0.8, 0.8]
@@ -73,11 +76,12 @@ class X2MujocoRuntime:
             q[self.robot.get_joint_offset(name)] = self.mj_data.qpos[self.mj_model.joint(name).qposadr[0]]
         return q
 
-    def _get_link_pose(self, name):
+    def _get_link_pose(self, name, data=None):
+        data = self.mj_data if data is None else data
         index = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, name)
         if index < 0:
             raise ValueError(f"End effector body '{name}' not found in the model")
-        return self.mj_data.xpos[index].copy(), self.mj_data.xquat[index].copy()
+        return data.xpos[index].copy(), data.xquat[index].copy()
 
     def _update_mocap_target(self):
         for name, task in self.effector_task.items():
